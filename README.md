@@ -312,6 +312,47 @@ fetch('/api/dashboard/shopify')
 
 如果接口成功返回，页面会用真实 Shopify 数据覆盖关键 mock 指标；如果接口失败或本地静态预览没有 API runtime，则继续显示 mock 数据作为兜底。
 
+### 在前台集成页保存配置
+
+项目也新增了集成配置接口：
+
+```text
+/api/integrations
+```
+
+打开：
+
+```text
+https://你的域名.vercel.app/settings/integration
+```
+
+填写：
+
+```text
+管理密钥：Vercel 里的 CRON_SECRET
+Store Domain：bohealthy.myshopify.com
+Client ID：Shopify Dev Dashboard 的 Client ID
+Client Secret：Shopify Dev Dashboard 的 Client Secret
+```
+
+然后点 **保存配置**。配置会写入 Supabase 的 `data_integrations` 表。后续 `/api/sync/shopify-orders` 会优先读取这里保存的 Shopify 配置；如果没有保存，才退回读取 Vercel 环境变量。
+
+保存后点 **手动同步**，会触发：
+
+```text
+/api/sync/shopify-orders
+```
+
+同步成功后，前台会再次读取 `/api/dashboard/shopify` 并更新关键指标。
+
+优惠券页的 **同步订单分类** 会触发：
+
+```text
+/api/sync/coupons
+```
+
+它会读取 `orders.discount_codes`，汇总写入 `coupon_codes`，然后页面会自动刷新券码列表与优惠券统计表。
+
 部署到 Vercel 后，确认真实数据接口：
 
 ```text

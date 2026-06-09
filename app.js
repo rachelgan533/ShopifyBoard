@@ -107,6 +107,8 @@ const state = {
   couponQuery: "",
   couponFilter: "all",
   dashboardData: null,
+  couponsData: null,
+  integrationSecret: "",
 };
 
 function currentPage() {
@@ -646,12 +648,12 @@ function operationsPage() {
     </div>`)}
     <div class="grid cols-2">
       ${donutCard("订单类型", [["普通", 76.4], ["B2B", 23.6]], ["#00896b", "#6375d6"])}
-      ${tableCard("优惠券使用", ["分类", "订单数", "占比"], [
+      <div data-coupon-usage-summary>${tableCard("优惠券使用", ["分类", "订单数", "占比"], [
         ["未用券", "104", "41.60%"],
         ["新人券", "0", "0.00%"],
         ["活动券", "81", "32.40%"],
         ["达人券", "65", "26.00%"],
-      ])}
+      ])}</div>
       ${barChartCard("转化漏斗", [["网站访客", 848991], ["进入购物车", 334182], ["点击支付", 112223], ["输入信用卡", 74917], ["购买成功", 54880]])}
       ${barChartCard("访问设备明细", [["手机", 460396], ["电脑", 280179], ["平板", 108416]], "#6375d6")}
     </div>
@@ -667,20 +669,20 @@ function operationsPage() {
 
 function marketingPage() {
   return `
-    ${section("营销概览", "", pill("演示数据", "orange"), `<div class="grid cols-5">
+    <div data-marketing-overview>${section("营销概览", "", pill("演示数据", "orange"), `<div class="grid cols-5">
       ${mockMetric("广告花费", "US$244,001.00")}
       ${mockMetric("销售额", "US$29,667.00")}
       ${mockMetric("ROAS", "0.00")}
       ${mockMetric("CPA", "802.00")}
       ${mockMetric("订单数", "310")}
-    </div>`)}
-    ${section("渠道表现", "", pill("演示数据", "orange"), tableCard("", ["渠道", "花费", "销售额", "订单数", "客户数", "ROAS", "CPA", "CVR"], [
+    </div>`)}</div>
+    <div data-marketing-channel-table>${section("渠道表现", "", pill("演示数据", "orange"), tableCard("", ["渠道", "花费", "销售额", "订单数", "客户数", "ROAS", "CPA", "CVR"], [
       ["Meta Ads", "US$79,584.00", "US$3,550.00", "36", "32", "0.04x", "US$2,210.67", "2.29%"],
       ["Google Ads", "US$61,727.00", "US$3,280.00", "38", "34", "0.05x", "US$1,624.39", "2.07%"],
       ["Organic", "US$8,213.00", "US$5,286.00", "56", "50", "0.64x", "US$146.66", "4.94%"],
       ["其他", "US$0.00", "US$7,987.04", "44", "43", "0.00x", "US$0.00", "0.00%"],
-    ]))}
-    ${section("营销漏斗", "Shopify + GA4", `${pill("Shopify")} ${pill("GA4", "red")}`, `<div class="card pad">
+    ]))}</div>
+    <div data-marketing-funnel>${section("营销漏斗", "Shopify + GA4", `${pill("Shopify")} ${pill("GA4", "red")}`, `<div class="card pad">
       ${[
         ["曝光", "100.00%", "23,208,133"],
         ["点击", "1.97%", "457,216"],
@@ -689,7 +691,7 @@ function marketingPage() {
         ["结账", "0.00%", "0"],
         ["购买", "0.01%", "1,377"],
       ].map(([a,b,c]) => `<div class="funnel-row"><b>${a}</b><div class="funnel-track"><div class="funnel-fill" style="width:${Math.max(parseFloat(b), 1)}%"></div></div><b class="num">${c}</b></div>`).join("")}
-    </div>`)}
+    </div>`)}</div>
     ${section("获客分析", "新客/回头客及广告获客成本", `${pill("Shopify")} ${pill("Google Ads", "red")} ${pill("Meta Ads", "red")}`, `<div class="grid cols-5">
       ${metricCard("新客户", "1,304", "-24.93%")}
       ${metricCard("回头客", "73", "+28.07%")}
@@ -714,20 +716,20 @@ function customersPage() {
       ${metricCard("新客销售额", "US$247,427.04", "-22.41%")}
     </div>`)}
     <div class="grid cols-2">
-      ${tableCard("用户分群", ["分类", "客户数", "销售额", "占比"], [
+      <div data-customer-segments>${tableCard("用户分群", ["分类", "客户数", "销售额", "占比"], [
         ["单次购买", "1,348", "US$252,365.26", "98.97%"],
         ["新客户", "1,302", "US$248,941.71", "95.59%"],
         ["用券客户", "1,086", "US$209,449.55", "79.74%"],
         ["联盟客户", "417", "US$79,240.18", "30.62%"],
         ["高价值客户", "396", "US$92,779.76", "29.07%"],
         ["复购客户", "70", "US$10,323.77", "5.14%"],
-      ])}
+      ])}</div>
       ${donutCard("客户分类分布", [["未用券客户", 20.26], ["新人券客户", 2.35], ["站内活动券客户", 42.88], ["达人券客户", 34.51]], ["#667085", "#f59e0b", "#00896b", "#3166d6"])}
     </div>
     ${section("地域分布", "", pill("Shopify"), `<div class="grid cols-2">
       ${barChartCard("区域销售额", countryRows.map((r) => [r[0], Number(r[2].replace(/[^0-9.]/g, ""))]))}
       ${barChartCard("区域客单价", countryRows.map((r) => [r[0], Number(r[3].replace(/[^0-9.]/g, ""))]), "#6375d6")}
-    </div>${tableCard("国家分布", ["地区", "客户数", "销售额", "客单价", "占比"], countryRows)}`)}
+    </div><div data-country-sales>${tableCard("国家分布", ["地区", "客户数", "销售额", "客单价", "占比"], countryRows)}</div>`)}
     ${section("获客质量", "", pill("Shopify"), `<div class="grid cols-3">
       ${metricCard("联盟客户占比", "30.60%", "-31.68%")}
       ${barChartCard("渠道客户数", [["Google", 461], ["直接访问", 428], ["Facebook", 253], ["Instagram", 154], ["其他", 43], ["Organic Search", 23]])}
@@ -744,7 +746,7 @@ function customersPage() {
 
 function aarrrPage() {
   return `
-    ${stage("A", "Acquisition", "获取 · 流量与广告投放", `
+    <div data-aarrr-acquisition>${stage("A", "Acquisition", "获取 · 流量与广告投放", `
       <div class="grid cols-3">
         ${mockMetric("Sessions", "11,780", "GA4")}
         ${mockMetric("Users", "8,866", "GA4")}
@@ -756,8 +758,8 @@ function aarrrPage() {
         ${donutCard("渠道来源占比", [["Google", 23.02], ["邮件营销", 21.84], ["TikTok", 19.68], ["Instagram", 15.28], ["Facebook", 14.58], ["直播访问", 5.60]], ["#00896b", "#49b994", "#6375d6", "#8999ea", "#f59e0b", "#a0aec0"])}
         ${barChartCard("渠道访问趋势", [["5月11日", 32000], ["5月18日", 32200], ["5月25日", 32100], ["6月1日", 32300], ["6月10日", 32150]])}
       </div>
-    `)}
-    ${stage("A", "Activation", "激活 · 站内转化与落地页", `
+    `)}</div>
+    <div data-aarrr-activation>${stage("A", "Activation", "激活 · 站内转化与落地页", `
       <div class="grid cols-3">
         ${mockMetric("加购率", "6.20%")}
         ${mockMetric("结账率", "2.50%")}
@@ -770,7 +772,7 @@ function aarrrPage() {
         ["4", "c16 cold press juicer", "/sandbox/products/c16", "11,453", "6.05%"],
         ["5", "c16 cold press juicer", "/modern/products/c16", "9,574", "5.06%"],
       ])}
-    `)}
+    `)}</div>
     ${stage("R", "Revenue", "收入 · 销售与优惠券", `<div class="grid cols-4">
       ${metricCard("商品总额", "US$296,429.28", "-72.68%")}
       ${metricCard("总销售额", "US$256,153.98", "-43.64%")}
@@ -778,12 +780,12 @@ function aarrrPage() {
       ${metricCard("客单价", "US$186.02", "-26.57%")}
       ${metricCard("退款额", "US$978.96", "+63.11%", "Shopify", spikySeries)}
       ${metricCard("用券率", "79.50%", "-2.37%")}
-    </div>${tableCard("优惠券类型分布", ["分类", "订单数", "销售额", "占比"], [
+    </div><div data-coupon-usage-breakdown>${tableCard("优惠券类型分布", ["分类", "订单数", "销售额", "占比"], [
       ["未用券", "283", "US$47,023.41", "20.55%"],
       ["新人券", "32", "US$5,609.62", "2.32%"],
       ["活动券", "588", "US$114,514.59", "42.70%"],
       ["达人券", "474", "US$89,006.36", "34.42%"],
-    ])}`)}
+    ])}</div>`)}
     ${stage("R", "Retention", "留存 · 新老客与复购", `<div class="grid cols-5">
       ${metricCard("新客订单", "1,304", "-24.93%")}
       ${metricCard("回头客订单", "73", "+28.07%", "Shopify", spikySeries)}
@@ -807,13 +809,13 @@ function aarrrPage() {
   `;
 }
 
-function stage(letter, title, subtitle, inner) {
+function stage(letter, title, subtitle, inner, badge = pill(title === "Acquisition" || title === "Activation" ? "演示数据" : "Shopify", title === "Acquisition" || title === "Activation" ? "orange" : "")) {
   return `
     <section class="section">
       <div class="section-head">
         <span class="source-icon" style="width:32px;height:32px;border-radius:7px;background:${letter === "A" ? "var(--green)" : letter === "R" ? "#6375d6" : "#f59e0b"};color:#fff;font-weight:850">${letter}</span>
         <div>
-          <div class="section-title">${title} ${pill(title === "Acquisition" || title === "Activation" ? "演示数据" : "Shopify", title === "Acquisition" || title === "Activation" ? "orange" : "")}</div>
+          <div class="section-title">${title} ${badge}</div>
           <div class="section-subtitle">${subtitle}</div>
         </div>
       </div>
@@ -856,10 +858,55 @@ function goalsPage() {
 
 function integrationPage() {
   const cards = [
-    ["S", "Shopify 店铺", "Shopify · Client Credentials", "已连接", ["Store Domain · 店铺域名", "hellocanoly"], ["Client ID · Shopify App Client ID", "45ca9d96d099c04c824cc705b7e1ed5a"], ["同步频率", "每 15 分钟"]],
-    ["G", "Google Analytics 4", "GA4 · Google OAuth", "已连接", ["Property ID · GA4 属性 ID", "446188485"], ["同步频率", "30"], ["Google Account · 授权 Google 账号", "已连接（邮箱未记录）"]],
-    ["A", "Google Ads", "Google Ads · OAuth", "未连接", ["Google OAuth Client ID", ""], ["Customer ID · 广告账号 ID", "1234567890"], ["同步频率", "每 1 小时"]],
-    ["M", "Meta Ads", "Meta Ads · Manual Token", "未连接", ["App ID · Meta 应用 ID", ""], ["Ad Account ID · 广告账户 ID", "act_1234567890"], ["同步频率", "每 1 小时"]],
+    {
+      source: "shopify",
+      icon: "S",
+      title: "Shopify 店铺",
+      subtitle: "Shopify · Client Credentials",
+      status: "待保存",
+      fields: [
+        ["shop_domain", "Store Domain · 店铺域名", "bohealthy.myshopify.com"],
+        ["client_id", "Client ID · Shopify App Client ID", ""],
+        ["client_secret", "Client Secret · 仅服务端保存", ""],
+        ["sync_interval", "同步频率", "每天一次"],
+      ],
+    },
+    {
+      source: "ga4",
+      icon: "G",
+      title: "Google Analytics 4",
+      subtitle: "GA4 · Google OAuth",
+      status: "未连接",
+      fields: [
+        ["property_id", "Property ID · GA4 属性 ID", ""],
+        ["sync_interval", "同步频率", "30"],
+      ],
+    },
+    {
+      source: "google_ads",
+      icon: "A",
+      title: "Google Ads",
+      subtitle: "Google Ads · OAuth",
+      status: "未连接",
+      fields: [
+        ["oauth_client_id", "Google OAuth Client ID", ""],
+        ["customer_id", "Customer ID · 广告账号 ID", ""],
+        ["sync_interval", "同步频率", "每 1 小时"],
+      ],
+    },
+    {
+      source: "meta_ads",
+      icon: "M",
+      title: "Meta Ads",
+      subtitle: "Meta Ads · Manual Token",
+      status: "未连接",
+      fields: [
+        ["app_id", "App ID · Meta 应用 ID", ""],
+        ["ad_account_id", "Ad Account ID · 广告账户 ID", ""],
+        ["access_token", "Access Token · 仅服务端保存", ""],
+        ["sync_interval", "同步频率", "每 1 小时"],
+      ],
+    },
   ];
   return `
     <div class="grid cols-3" style="max-width:900px;margin:0 auto 24px">
@@ -867,11 +914,17 @@ function integrationPage() {
       <div class="card pad"><div class="muted">已连接</div><div class="metric-value" style="color:var(--green)">2</div></div>
       <div class="card pad"><div class="muted">连接异常</div><div class="metric-value" style="color:var(--red)">0</div></div>
     </div>
+    <div class="card pad" style="max-width:900px;margin:0 auto 24px">
+      <div class="field">
+        <label>管理密钥 · 填 Vercel 中的 CRON_SECRET 后才能保存/同步</label>
+        <input data-integration-secret type="password" value="${state.integrationSecret}" placeholder="请输入 CRON_SECRET" />
+      </div>
+    </div>
     <div class="grid" style="max-width:900px;margin:0 auto">
       ${cards
         .map(
-          ([icon, title, subtitle, status, ...fields]) => `
-            <div class="card settings-card">
+          ({ source, icon, title, subtitle, status, fields }) => `
+            <div class="card settings-card" data-integration-card="${source}">
               <div class="metric-head">
                 <div style="display:flex;gap:14px;align-items:center">
                   <span class="source-icon" style="width:36px;height:36px;border-radius:7px;background:${icon === "G" ? "#f59e0b" : icon === "A" ? "#4f80ff" : icon === "M" ? "#3478f6" : "var(--green)"};color:#fff;font-weight:850">${icon}</span>
@@ -881,13 +934,13 @@ function integrationPage() {
               </div>
               <div class="placeholder-line"></div>
               <div class="form-grid">
-                ${fields.map(([label, value]) => `<div class="field"><label>${label}</label><input value="${value}" /></div>`).join("")}
+                ${fields.map(([key, label, value]) => `<div class="field"><label>${label}</label><input data-config-key="${key}" value="${value}" ${/secret|token/i.test(key) ? 'type="password"' : ""} /></div>`).join("")}
               </div>
               <div class="button-row">
                 <button class="ghost-btn" data-action="disconnect-source">断开连接</button>
-                <button class="ghost-btn" data-action="save-source">保存配置</button>
-                <button class="ghost-btn" data-action="test-source">测试连接</button>
-                <button class="primary-btn" data-action="manual-sync">手动同步</button>
+                <button class="ghost-btn" data-action="save-source" data-source="${source}">保存配置</button>
+                <button class="ghost-btn" data-action="test-source" data-source="${source}">测试连接</button>
+                <button class="primary-btn" data-action="manual-sync" data-source="${source}">手动同步</button>
               </div>
             </div>
           `,
@@ -922,8 +975,11 @@ function couponsPage() {
 }
 
 function filteredCouponRows() {
+  const sourceRows = state.couponsData?.length
+    ? state.couponsData.map((row) => [row.code, row.category, row.owner || "-", formatInteger(row.usage_count), row.status || "启用"])
+    : couponRows;
   const query = state.couponQuery.trim().toLowerCase();
-  return couponRows.filter((row) => {
+  return sourceRows.filter((row) => {
     const matchesQuery = !query || row.join(" ").toLowerCase().includes(query);
     const matchesFilter =
       state.couponFilter === "all" || row[4] === state.couponFilter || row[1] === state.couponFilter;
@@ -976,6 +1032,8 @@ function render() {
     coupons: couponsPage,
   };
   app.innerHTML = layout(pages[page]());
+  if (page === "integration") loadIntegrationConfigs();
+  if (page === "coupons") loadCoupons();
   hydrateDashboardData();
 }
 
@@ -1004,11 +1062,16 @@ app.addEventListener("click", (event) => {
 
   const actionButton = event.target.closest("[data-action]");
   if (actionButton) {
-    handleAction(actionButton.dataset.action);
+    handleAction(actionButton.dataset.action, actionButton);
   }
 });
 
 app.addEventListener("input", (event) => {
+  if (event.target.matches("[data-integration-secret]")) {
+    state.integrationSecret = event.target.value;
+    return;
+  }
+
   if (!event.target.matches("[data-coupon-search]")) return;
   state.couponQuery = event.target.value;
   updateCouponResults();
@@ -1029,7 +1092,37 @@ function updateCouponResults() {
   if (count) count.textContent = rows.length;
 }
 
-function handleAction(action) {
+async function handleAction(action, button) {
+  if (action === "save-source") {
+    await saveIntegration(button);
+    return;
+  }
+
+  if (action === "test-source") {
+    await saveIntegration(button);
+    if (button?.dataset.source === "shopify") await runShopifySync();
+    return;
+  }
+
+  if (action === "manual-sync") {
+    if (button?.dataset.source === "shopify") {
+      await runShopifySync();
+    } else {
+      showToast("这个数据源的同步接口还没接入，当前只接通 Shopify。");
+    }
+    return;
+  }
+
+  if (action === "sync-coupons") {
+    await syncCoupons();
+    return;
+  }
+
+  if (action === "disconnect-source") {
+    await disconnectSource(button);
+    return;
+  }
+
   const messages = {
     logout: "这是演示前台，真实登录退出需要接 Supabase Auth。",
     notifications: "暂无新通知。",
@@ -1046,6 +1139,140 @@ function handleAction(action) {
     "manual-sync": "已模拟触发手动同步任务。",
   };
   showToast(messages[action] || "操作已触发。");
+}
+
+async function saveIntegration(button) {
+  const card = button?.closest("[data-integration-card]");
+  const source = button?.dataset.source || card?.dataset.integrationCard;
+  if (!card || !source) return showToast("没有找到当前集成配置。");
+  if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
+
+  const config = {};
+  card.querySelectorAll("[data-config-key]").forEach((input) => {
+    config[input.dataset.configKey] = input.value;
+  });
+
+  try {
+    const response = await fetch("/api/integrations", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${state.integrationSecret}`,
+      },
+      body: JSON.stringify({ source, config, status: "connected" }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "保存失败");
+    showToast(`${sourceLabel(source)} 配置已保存到 Supabase。`);
+    loadIntegrationConfigs();
+  } catch (error) {
+    showToast(`保存失败：${error.message}`);
+  }
+}
+
+async function disconnectSource(button) {
+  const card = button?.closest("[data-integration-card]");
+  const source = card?.dataset.integrationCard;
+  if (!source) return showToast("没有找到当前集成配置。");
+  if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
+
+  try {
+    const response = await fetch("/api/integrations", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${state.integrationSecret}`,
+      },
+      body: JSON.stringify({ source, status: "disconnected", config: {} }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "断开失败");
+    showToast(`${sourceLabel(source)} 已断开。`);
+    loadIntegrationConfigs();
+  } catch (error) {
+    showToast(`断开失败：${error.message}`);
+  }
+}
+
+async function runShopifySync() {
+  if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
+
+  showToast("正在触发 Shopify 同步...");
+  try {
+    const response = await fetch(`/api/sync/shopify-orders?secret=${encodeURIComponent(state.integrationSecret)}`);
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "同步失败");
+    state.dashboardData = null;
+    await hydrateDashboardData();
+    showToast(`Shopify 同步完成：订单 ${data.imported_orders}，明细 ${data.imported_line_items}`);
+  } catch (error) {
+    showToast(`同步失败：${error.message}`);
+  }
+}
+
+async function syncCoupons() {
+  if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
+
+  showToast("正在同步优惠券分类...");
+  try {
+    const response = await fetch(`/api/sync/coupons?secret=${encodeURIComponent(state.integrationSecret)}`);
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "同步失败");
+    state.couponsData = null;
+    await loadCoupons();
+    state.dashboardData = null;
+    await hydrateDashboardData();
+    showToast(`优惠券同步完成：${data.synced_coupons} 个券码`);
+  } catch (error) {
+    showToast(`优惠券同步失败：${error.message}`);
+  }
+}
+
+async function loadIntegrationConfigs() {
+  try {
+    const response = await fetch("/api/integrations");
+    if (!response.ok) return;
+    const data = await response.json();
+    if (!data.ok) return;
+
+    for (const item of data.integrations || []) {
+      const card = document.querySelector(`[data-integration-card="${item.source}"]`);
+      if (!card) continue;
+      for (const [key, value] of Object.entries(item.config || {})) {
+        const input = card.querySelector(`[data-config-key="${key}"]`);
+        if (input) input.value = value;
+      }
+      const status = card.querySelector(".status");
+      if (status) {
+        status.textContent = item.status === "connected" ? "已保存" : item.status || "未连接";
+        status.classList.toggle("gray", item.status !== "connected");
+      }
+    }
+  } catch {
+    // Keep form defaults when API is unavailable.
+  }
+}
+
+async function loadCoupons() {
+  try {
+    const response = await fetch("/api/coupons");
+    if (!response.ok) return;
+    const data = await response.json();
+    if (!data.ok) return;
+    state.couponsData = data.coupons || [];
+    updateCouponResults();
+  } catch {
+    // Keep mock coupons in place if API is unavailable.
+  }
+}
+
+function sourceLabel(source) {
+  return {
+    shopify: "Shopify",
+    ga4: "GA4",
+    google_ads: "Google Ads",
+    meta_ads: "Meta Ads",
+  }[source] || source;
 }
 
 function showToast(message) {
@@ -1081,6 +1308,9 @@ async function hydrateDashboardData() {
 
 function applyDashboardData(data) {
   const summary = data.summary || {};
+  const adTotals = buildAdTotals(data.ad_performance || []);
+  const channelMix = buildChannelMix(data.channel_sales || [], data.ad_performance || []);
+  const funnelSteps = buildFunnelSteps(data.ga4_funnel || {}, adTotals, summary);
   const values = {
     gmv: formatCurrency(summary.gmv),
     net_sales: formatCurrency(summary.net_sales),
@@ -1120,6 +1350,281 @@ function applyDashboardData(data) {
       ]),
     );
   }
+
+  const countrySales = document.querySelector("[data-country-sales]");
+  if (countrySales && data.country_sales?.length) {
+    countrySales.innerHTML = tableCard(
+      "国家分布",
+      ["地区", "客户数", "销售额", "客单价", "占比"],
+      data.country_sales.map((row) => [
+        escapeHtml(row.country),
+        formatInteger(row.customers),
+        formatCurrency(row.revenue),
+        formatCurrency(row.aov),
+        `${formatNumber(row.order_share)}%`,
+      ]),
+    );
+  }
+
+  const customerSegments = document.querySelector("[data-customer-segments]");
+  if (customerSegments && data.customer_segments?.length) {
+    const totalRevenue = data.customer_segments.reduce((sum, row) => sum + Number(row.revenue || 0), 0) || 1;
+    customerSegments.innerHTML = tableCard(
+      "用户分群",
+      ["分类", "客户数", "销售额", "占比"],
+      data.customer_segments.map((row) => [
+        escapeHtml(row.segment),
+        formatInteger(row.customers),
+        formatCurrency(row.revenue),
+        `${formatNumber((row.revenue / totalRevenue) * 100)}%`,
+      ]),
+    );
+  }
+
+  const couponUsageSummary = document.querySelector("[data-coupon-usage-summary]");
+  if (couponUsageSummary && data.coupon_usage?.length) {
+    couponUsageSummary.innerHTML = tableCard(
+      "优惠券使用",
+      ["分类", "订单数", "占比"],
+      data.coupon_usage.map((row) => [
+        escapeHtml(row.category),
+        formatInteger(row.orders),
+        `${formatNumber(row.order_share)}%`,
+      ]),
+    );
+  }
+
+  const couponUsageBreakdown = document.querySelector("[data-coupon-usage-breakdown]");
+  if (couponUsageBreakdown && data.coupon_usage?.length) {
+    couponUsageBreakdown.innerHTML = tableCard(
+      "优惠券类型分布",
+      ["分类", "订单数", "销售额", "占比"],
+      data.coupon_usage.map((row) => [
+        escapeHtml(row.category),
+        formatInteger(row.orders),
+        formatCurrency(row.revenue),
+        `${formatNumber(row.order_share)}%`,
+      ]),
+    );
+  }
+
+  const marketingOverview = document.querySelector("[data-marketing-overview]");
+  if (marketingOverview && (data.ad_performance?.length || data.ga4_funnel?.sessions)) {
+    marketingOverview.innerHTML = section(
+      "营销概览",
+      "广告平台与站内转化汇总",
+      `${pill("Google Ads", "red")} ${pill("Meta Ads", "red")} ${pill("GA4")} ${pill("Shopify")}`,
+      `<div class="grid cols-5">
+        ${metricCard("广告花费", formatCurrency(adTotals.spend), adTotals.spend ? "+0.00%" : "0.00%", "Ads", metricSeries)}
+        ${metricCard("销售额", formatCurrency(adTotals.revenue), adTotals.revenue ? "+0.00%" : "0.00%", "Ads", trendSeries)}
+        ${metricCard("ROAS", `${formatNumber(adTotals.roas)}x`, adTotals.roas ? "+0.00%" : "0.00%", "Ads", metricSeries)}
+        ${metricCard("CPA", formatCurrency(adTotals.cpa), adTotals.purchases ? "+0.00%" : "0.00%", "Ads", spikySeries)}
+        ${metricCard("订单数", formatInteger(adTotals.purchases || summary.orders), summary.orders ? "+0.00%" : "0.00%", "Shopify", metricSeries)}
+      </div>`,
+    );
+  }
+
+  const marketingChannelTable = document.querySelector("[data-marketing-channel-table]");
+  if (marketingChannelTable && channelMix.length) {
+    marketingChannelTable.innerHTML = section(
+      "渠道表现",
+      "按渠道汇总广告表现与站内收入",
+      `${pill("Ads", "red")} ${pill("Shopify")}`,
+      tableCard(
+        "",
+        ["渠道", "花费", "销售额", "订单数", "客户数", "ROAS", "CPA", "CVR"],
+        channelMix.map((row) => [
+          escapeHtml(row.channel),
+          formatCurrency(row.spend),
+          formatCurrency(row.revenue),
+          formatInteger(row.orders),
+          formatInteger(row.customers),
+          `${formatNumber(row.roas)}x`,
+          formatCurrency(row.cpa),
+          `${formatNumber(row.cvr)}%`,
+        ]),
+      ),
+    );
+  }
+
+  const marketingFunnel = document.querySelector("[data-marketing-funnel]");
+  if (marketingFunnel && funnelSteps.length) {
+    marketingFunnel.innerHTML = section(
+      "营销漏斗",
+      "Shopify + GA4 + 广告平台",
+      `${pill("Shopify")} ${pill("GA4")} ${pill("Ads", "red")}`,
+      `<div class="card pad">
+        ${funnelSteps
+          .map(
+            (step) => `
+              <div class="funnel-row">
+                <b>${escapeHtml(step.label)}</b>
+                <div class="funnel-track"><div class="funnel-fill" style="width:${Math.max(step.width, 1)}%"></div></div>
+                <b class="num">${formatInteger(step.value)}</b>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>`,
+    );
+  }
+
+  const aarrrAcquisition = document.querySelector("[data-aarrr-acquisition]");
+  if (aarrrAcquisition && (data.ga4_funnel?.sessions || data.ad_performance?.length || channelMix.length)) {
+    aarrrAcquisition.innerHTML = stage(
+      "A",
+      "Acquisition",
+      "获取 · 流量与广告投放",
+      `
+        <div class="grid cols-3">
+          ${metricCard("Sessions", formatInteger(data.ga4_funnel?.sessions), data.ga4_funnel?.sessions ? "+0.00%" : "0.00%", "GA4", metricSeries)}
+          ${metricCard("Users", formatInteger(data.ga4_funnel?.users), data.ga4_funnel?.users ? "+0.00%" : "0.00%", "GA4", trendSeries)}
+          ${metricCard("广告花费", formatCurrency(adTotals.spend), adTotals.spend ? "+0.00%" : "0.00%", "Ads", spikySeries)}
+          ${metricCard("CPC", formatCurrency(adTotals.cpc), adTotals.clicks ? "+0.00%" : "0.00%", "Ads", metricSeries)}
+          ${metricCard("CPM", formatCurrency(adTotals.cpm), adTotals.impressions ? "+0.00%" : "0.00%", "Ads", metricSeries)}
+        </div>
+        <div class="grid cols-2" style="margin-top:18px">
+          ${donutCard(
+            "渠道来源占比",
+            (channelMix.length ? channelMix : [{ channel: "Other", mix_share: 100 }])
+              .slice(0, 6)
+              .map((row) => [row.channel, row.mix_share || 0]),
+            ["#00896b", "#49b994", "#6375d6", "#8999ea", "#f59e0b", "#a0aec0"],
+          )}
+          ${barChartCard(
+            "获取链路",
+            [
+              ["广告曝光", adTotals.impressions],
+              ["广告点击", adTotals.clicks],
+              ["站内访问", data.ga4_funnel?.sessions || 0],
+              ["新客", summary.customers || 0],
+              ["订单", summary.orders || 0],
+            ],
+          )}
+        </div>
+      `,
+      `${pill("GA4")} ${pill("Ads", "red")} ${pill("Shopify")}`,
+    );
+  }
+
+  const aarrrActivation = document.querySelector("[data-aarrr-activation]");
+  if (aarrrActivation && (data.ga4_funnel?.sessions || data.ga4_funnel?.add_to_carts || data.ga4_funnel?.purchases)) {
+    aarrrActivation.innerHTML = stage(
+      "A",
+      "Activation",
+      "激活 · 站内转化与落地页",
+      `
+        <div class="grid cols-3">
+          ${metricCard("加购率", `${formatNumber(data.ga4_funnel?.add_to_cart_rate)}%`, data.ga4_funnel?.add_to_carts ? "+0.00%" : "0.00%", "GA4", metricSeries)}
+          ${metricCard("结账率", `${formatNumber(data.ga4_funnel?.checkout_rate)}%`, data.ga4_funnel?.checkouts ? "+0.00%" : "0.00%", "GA4", trendSeries)}
+          ${metricCard("转化率", `${formatNumber(data.ga4_funnel?.cvr)}%`, data.ga4_funnel?.purchases ? "+0.00%" : "0.00%", "GA4", spikySeries)}
+        </div>
+        ${tableCard(
+          "激活漏斗明细",
+          ["阶段", "人数", "占会话比"],
+          [
+            ["Sessions", formatInteger(data.ga4_funnel?.sessions), "100.00%"],
+            ["Add to carts", formatInteger(data.ga4_funnel?.add_to_carts), `${formatNumber(data.ga4_funnel?.add_to_cart_rate)}%`],
+            ["Checkouts", formatInteger(data.ga4_funnel?.checkouts), `${formatNumber(data.ga4_funnel?.checkout_rate)}%`],
+            ["Purchases", formatInteger(data.ga4_funnel?.purchases), `${formatNumber(data.ga4_funnel?.cvr)}%`],
+          ],
+        )}
+      `,
+      `${pill("GA4")} ${pill("Shopify")}`,
+    );
+  }
+}
+
+function buildAdTotals(rows) {
+  const totals = rows.reduce(
+    (result, row) => {
+      result.spend += Number(row.spend || 0);
+      result.revenue += Number(row.revenue || 0);
+      result.impressions += Number(row.impressions || 0);
+      result.clicks += Number(row.clicks || 0);
+      result.purchases += Number(row.purchases || 0);
+      return result;
+    },
+    { spend: 0, revenue: 0, impressions: 0, clicks: 0, purchases: 0 },
+  );
+
+  return {
+    ...totals,
+    roas: totals.spend ? totals.revenue / totals.spend : 0,
+    cpa: totals.purchases ? totals.spend / totals.purchases : 0,
+    cpc: totals.clicks ? totals.spend / totals.clicks : 0,
+    cpm: totals.impressions ? (totals.spend / totals.impressions) * 1000 : 0,
+  };
+}
+
+function buildChannelMix(channelRows, adRows) {
+  const adMap = new Map();
+  adRows.forEach((row) => {
+    const key = normalizeChannel(row.source);
+    adMap.set(key, {
+      channel: row.source || "Unknown",
+      spend: Number(row.spend || 0),
+      revenue: Number(row.revenue || 0),
+      orders: Number(row.purchases || 0),
+      customers: Number(row.purchases || 0),
+      roas: Number(row.roas || 0),
+      cpa: Number(row.cpa || 0),
+      cvr: Number(row.clicks ? (row.purchases / row.clicks) * 100 : 0),
+    });
+  });
+
+  const rows = channelRows.map((row) => {
+    const key = normalizeChannel(row.channel);
+    const ad = adMap.get(key);
+    return {
+      channel: row.channel || ad?.channel || "Unknown",
+      spend: Number(ad?.spend || 0),
+      revenue: Number(row.revenue || ad?.revenue || 0),
+      orders: Number(row.orders || ad?.orders || 0),
+      customers: Number(row.customers || ad?.customers || 0),
+      roas: Number(ad?.roas || (ad?.spend ? Number(row.revenue || 0) / ad.spend : 0)),
+      cpa: Number(ad?.cpa || (ad?.orders ? (ad.spend || 0) / ad.orders : 0)),
+      cvr: Number(ad?.cvr || (row.customers ? (row.orders / row.customers) * 100 : 0)),
+    };
+  });
+
+  adMap.forEach((row, key) => {
+    if (!rows.some((item) => normalizeChannel(item.channel) === key)) {
+      rows.push({ ...row });
+    }
+  });
+
+  const totalRevenue = rows.reduce((sum, row) => sum + row.revenue, 0) || 1;
+  return rows
+    .map((row) => ({
+      ...row,
+      mix_share: (row.revenue / totalRevenue) * 100,
+    }))
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 8);
+}
+
+function buildFunnelSteps(ga4, adTotals, summary) {
+  const steps = [
+    { label: "曝光", value: adTotals.impressions },
+    { label: "点击", value: adTotals.clicks },
+    { label: "访问 Sessions", value: Number(ga4.sessions || 0) },
+    { label: "加购", value: Number(ga4.add_to_carts || 0) },
+    { label: "结账", value: Number(ga4.checkouts || 0) },
+    { label: "购买", value: Number(ga4.purchases || summary.orders || 0) },
+  ];
+  const max = steps[0]?.value || 1;
+  return steps.map((step) => ({
+    ...step,
+    width: max ? (step.value / max) * 100 : 0,
+  }));
+}
+
+function normalizeChannel(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s-]+/g, "");
 }
 
 function formatCurrency(value) {

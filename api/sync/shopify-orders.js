@@ -148,16 +148,8 @@ function assertAuthorized(req) {
 }
 
 function assertEnv() {
-  const required = ["SHOPIFY_SHOP_DOMAIN", "SUPABASE_URL", "SUPABASE_SECRET_KEY"];
+  const required = ["SUPABASE_URL", "SUPABASE_SECRET_KEY"];
   const missing = required.filter((key) => !process.env[key]);
-
-  if (!process.env.SHOPIFY_ADMIN_ACCESS_TOKEN && !process.env.SHOPIFY_CLIENT_ID) {
-    missing.push("SHOPIFY_CLIENT_ID/SHOPIFY_CLIENT_SECRET 或 SHOPIFY_ADMIN_ACCESS_TOKEN");
-  }
-
-  if (process.env.SHOPIFY_CLIENT_ID && !process.env.SHOPIFY_CLIENT_SECRET) {
-    missing.push("SHOPIFY_CLIENT_SECRET");
-  }
 
   if (missing.length) {
     const error = new Error(`Missing environment variables: ${missing.join(", ")}`);
@@ -167,10 +159,11 @@ function assertEnv() {
 }
 
 async function syncShopifyOrders() {
-  const shopDomain = normalizeShopDomain(process.env.SHOPIFY_SHOP_DOMAIN);
+  const config = await getIntegrationConfig("shopify");
+  const shopDomain = normalizeShopDomain(config.shop_domain || process.env.SHOPIFY_SHOP_DOMAIN);
   const first = Number(process.env.SHOPIFY_SYNC_PAGE_SIZE || 50);
   const maxPages = Number(process.env.SHOPIFY_SYNC_MAX_PAGES || 4);
-  const accessToken = await getShopifyAccessToken(shopDomain);
+  const accessToken = await getShopifyAccessToken(shopDomain, config);
 
   const shop = await ensureShop(shopDomain, accessToken);
   await assertShopifyScopes(shopDomain, accessToken, ["read_orders"]);
@@ -241,25 +234,48 @@ async function syncShopifyOrders() {
   };
 }
 
-async function getShopifyAccessToken(shopDomain) {
-  if (process.env.SHOPIFY_CLIENT_ID && process.env.SHOPIFY_CLIENT_SECRET) {
-    return getShopifyClientCredentialsToken(shopDomain);
-  }
-
-  if (process.env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
-    return process.env.SHOPIFY_ADMIN_ACCESS_TOKEN.trim();
-  }
+async function getIntegrationConfig(source) {
+  const rows = await supabaseFetch(
+    `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}&select=config&limit=1`,
+  );
+  return rows[0]?.config || {};
 }
 
-async function getShopifyClientCredentialsToken(shopDomain) {
+async function getShopifyAccessToken(shopDomain, config = {}) {
+  const clientId = config.client_id || process.env.SHOPIFY_CLIENT_ID;
+  const clientSecret = config.client_secret || process.env.SHOPIFY_CLIENT_SECRET;
+  const adminToken = config.admin_access_token || process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
+
+  if (!shopDomain) {
+    const error = new Error("Missing Shopify shop domain");
+    error.details = { fix: "Fill Store Domain in Settings -> Integration, or set SHOPIFY_SHOP_DOMAIN in Vercel." };
+    throw error;
+  }
+
+  if (clientId && clientSecret) {
+    return getShopifyClientCredentialsToken(shopDomain, clientId, clientSecret);
+  }
+
+  if (adminToken) {
+    return adminToken.trim();
+  }
+
+  const error = new Error("Missing Shopify credentials");
+  error.details = {
+    fix: "Fill Client ID and Client Secret in Settings -> Integration, or set SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET in Vercel.",
+  };
+  throw error;
+}
+
+async function getShopifyClientCredentialsToken(shopDomain, clientId, clientSecret) {
   const url = `https://${shopDomain}/admin/oauth/access_token`;
   const response = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "client_credentials",
-      client_id: process.env.SHOPIFY_CLIENT_ID,
-      client_secret: process.env.SHOPIFY_CLIENT_SECRET,
+      client_id: clientId,
+      client_secret: clientSecret,
     }).toString(),
   });
 
@@ -550,6 +566,7 @@ function normalizeShopDomain(value) {
     .replace(/\/$/, "")
     .trim();
 
+  if (!domain) return "";
   if (!domain.includes(".")) return `${domain}.myshopify.com`;
   return domain;
 }
