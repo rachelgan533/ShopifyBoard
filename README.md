@@ -162,15 +162,15 @@ order by revenue desc;
 
 ```bash
 SHOPIFY_SHOP_DOMAIN=your-store.myshopify.com
-SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_xxx
 SHOPIFY_API_VERSION=2026-04
+SHOPIFY_CLIENT_ID=xxx
+SHOPIFY_CLIENT_SECRET=xxx
 
 SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_SECRET_KEY=sb_secret_xxx
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxx
 
-SHOPIFY_WEBHOOK_SECRET=xxx
 CRON_SECRET=xxx
 ```
 
@@ -185,7 +185,24 @@ CRON_SECRET=xxx
    - `read_products`
    - `read_inventory` 可选
    - 如果要同步历史 60 天以前订单，需要申请 Shopify 的 all orders 权限。
-5. 安装 App，复制 Admin API access token。
+5. 安装 App。
+6. 在 Dev Dashboard 的 Settings 页面复制 **Client ID** 和 **Client Secret**。
+
+新的 Shopify Dev Dashboard 应用通常不会直接显示长期 Admin API access token。项目会使用 **Client Credentials Grant**，自动向 Shopify 请求 24 小时有效的 access token。
+
+Shopify token 请求地址是：
+
+```text
+https://{shop}.myshopify.com/admin/oauth/access_token
+```
+
+Body 格式是 `application/x-www-form-urlencoded`：
+
+```text
+grant_type=client_credentials
+client_id=你的 Client ID
+client_secret=你的 Client Secret
+```
 
 ### 在 Vercel 配环境变量
 
@@ -194,7 +211,8 @@ CRON_SECRET=xxx
 ```bash
 SHOPIFY_SHOP_DOMAIN=your-store.myshopify.com
 SHOPIFY_API_VERSION=2026-04
-SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_or_token
+SHOPIFY_CLIENT_ID=你的 Client ID
+SHOPIFY_CLIENT_SECRET=你的 Client Secret
 
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SECRET_KEY=your-service-role-or-secret-key

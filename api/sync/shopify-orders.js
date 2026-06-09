@@ -153,7 +153,7 @@ function assertEnv() {
   const missing = required.filter((key) => !process.env[key]);
 
   if (!process.env.SHOPIFY_ADMIN_ACCESS_TOKEN && !process.env.SHOPIFY_CLIENT_ID) {
-    missing.push("SHOPIFY_ADMIN_ACCESS_TOKEN 或 SHOPIFY_CLIENT_ID/SHOPIFY_CLIENT_SECRET");
+    missing.push("SHOPIFY_CLIENT_ID/SHOPIFY_CLIENT_SECRET 或 SHOPIFY_ADMIN_ACCESS_TOKEN");
   }
 
   if (process.env.SHOPIFY_CLIENT_ID && !process.env.SHOPIFY_CLIENT_SECRET) {
@@ -241,19 +241,25 @@ async function syncShopifyOrders() {
 }
 
 async function getShopifyAccessToken(shopDomain) {
-  if (process.env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
-    return process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
+  if (process.env.SHOPIFY_CLIENT_ID && process.env.SHOPIFY_CLIENT_SECRET) {
+    return getShopifyClientCredentialsToken(shopDomain);
   }
 
+  if (process.env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+    return process.env.SHOPIFY_ADMIN_ACCESS_TOKEN.trim();
+  }
+}
+
+async function getShopifyClientCredentialsToken(shopDomain) {
   const url = `https://${shopDomain}/admin/oauth/access_token`;
   const response = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
       client_id: process.env.SHOPIFY_CLIENT_ID,
       client_secret: process.env.SHOPIFY_CLIENT_SECRET,
-      grant_type: "client_credentials",
-    }),
+    }).toString(),
   });
 
   const body = await response.json().catch(() => ({}));
@@ -486,10 +492,13 @@ function numberOrZero(value) {
 }
 
 function normalizeShopDomain(value) {
-  return String(value || "")
+  const domain = String(value || "")
     .replace(/^https?:\/\//, "")
     .replace(/\/$/, "")
     .trim();
+
+  if (!domain.includes(".")) return `${domain}.myshopify.com`;
+  return domain;
 }
 
 function trimSlash(value) {
