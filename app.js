@@ -102,6 +102,7 @@ const couponRows = [
 
 const app = document.querySelector("#app");
 const state = {
+  storeName: "Canoly",
   range: "近 30 天",
   customRange: {
     start: "",
@@ -115,6 +116,7 @@ const state = {
   dashboardDataKey: "",
   couponsData: null,
   integrationSecret: "",
+  simulator: null,
 };
 
 function currentPage() {
@@ -164,11 +166,11 @@ function sidebar(page) {
   return `
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">⌂</div>
-        <div>
-          <div class="brand-title">Canoly</div>
+      <div class="brand-mark">⌂</div>
+      <div>
+          <div class="brand-title" data-brand-title>${escapeHtml(state.storeName)}</div>
           <div class="brand-subtitle">Data Centre</div>
-        </div>
+      </div>
       </div>
       <nav class="nav">
         <div class="nav-group">${navItems.map(link).join("")}</div>
@@ -202,7 +204,8 @@ function topbar(title, kicker, page) {
         }
         <div class="search"><input placeholder="搜索..." /></div>
         <button class="icon-btn" title="通知" data-action="notifications">♧</button>
-        <div class="avatar">C</div>
+        <div class="store-chip" data-store-name>${escapeHtml(state.storeName)}</div>
+        <div class="avatar" data-store-avatar>${escapeHtml(initialOf(state.storeName))}</div>
       </div>
     </header>
   `;
@@ -305,12 +308,25 @@ function metricCard(label, value, delta = "+0.00%", source = "Shopify", series =
 function metricKey(label) {
   return {
     总销售额: "gmv",
-    商品总额: "gmv",
+    商品总额: "gross_sales",
     订单数: "orders",
     客单价: "aov",
     退款额: "refunds",
     新客户: "customers",
     店铺总客户数: "customers",
+    新客销售额: "new_customer_revenue",
+    回头客销售额: "returning_customer_revenue",
+    新客订单: "new_customer_orders",
+    回头客订单: "returning_customer_orders",
+    复购率: "repeat_rate",
+    广告获客成本: "cac",
+    新客户: "new_customers",
+    回头客: "returning_customers",
+    店铺总客户数: "customers",
+    人均消费: "avg_customer_value",
+    "LTV（生命周期价值）": "avg_customer_value",
+    购买频次: "purchase_frequency",
+    用券率: "coupon_order_rate",
     Sessions: "sessions",
     Users: "users",
     广告花费: "spend",
@@ -501,6 +517,132 @@ function goalBreakdownPanel(title, subtitle, rows) {
   `;
 }
 
+function ensureSimulatorState(goal) {
+  if (!goal) return null;
+
+  const rangeKey = state.dashboardDataKey || `${goal.start_date}:${goal.end_date}:${state.range}`;
+  const shouldReset =
+    !state.simulator || state.simulator.goalId !== goal.id || state.simulator.rangeKey !== rangeKey;
+
+  if (shouldReset) {
+    state.simulator = {
+      goalId: goal.id,
+      rangeKey,
+      sessions: Number(goal.monthly_sessions_run_rate || 0),
+      cvr: Number(goal.current_cvr || 0),
+      aov: Number(goal.current_aov || 0),
+    };
+  }
+
+  return state.simulator;
+}
+
+function computeSimulatorResult(goal) {
+  const simulator = ensureSimulatorState(goal);
+  const sessions = Number(simulator?.sessions || 0);
+  const cvr = Number(simulator?.cvr || 0);
+  const aov = Number(simulator?.aov || 0);
+  const forecast = sessions * (cvr / 100) * aov;
+  const gap = Math.max(Number(goal?.target_gmv || 0) - forecast, 0);
+  return { sessions, cvr, aov, forecast, gap };
+}
+
+function simulatorSliderConfig(goal, result) {
+  const sessionsBase = Math.max(Number(goal.monthly_sessions_run_rate || 0), Number(goal.required_monthly_sessions || 0), 1000);
+  const cvrBase = Math.max(Number(goal.current_cvr || 0), 1);
+  const aovBase = Math.max(Number(goal.current_aov || 0), 25);
+
+  return {
+    sessions: {
+      label: "Sessions (月)",
+      min: 0,
+      max: Math.max(Math.ceil(sessionsBase * 2.2), 5000),
+      step: 100,
+      value: result.sessions,
+      display: formatInteger(result.sessions),
+    },
+    cvr: {
+      label: "CVR",
+      min: 0,
+      max: Math.max(Math.ceil(cvrBase * 2.5), 8),
+      step: 0.01,
+      value: result.cvr,
+      display: `${formatNumber(result.cvr)}%`,
+    },
+    aov: {
+      label: "AOV",
+      min: 0,
+      max: Math.max(Math.ceil(aovBase * 2.2), 300),
+      step: 1,
+      value: result.aov,
+      display: formatCurrency(result.aov),
+    },
+  };
+}
+
+function renderGrowthSimulator(goal) {
+  const result = computeSimulatorResult(goal);
+  const sliders = simulatorSliderConfig(goal, result);
+  const rows = [
+    ["sessions", sliders.sessions],
+    ["cvr", sliders.cvr],
+    ["aov", sliders.aov],
+  ];
+
+  return `
+    <div class="card pad">
+      <div class="section-head">
+        <div>
+          <div class="section-title">增长模拟器</div>
+          <div class="section-subtitle">Growth Simulator</div>
+        </div>
+      </div>
+      <div class="simulator">
+        <div>
+          ${rows
+            .map(
+              ([key, config]) => `
+                <label class="slider-row" for="sim-${key}">
+                  <div class="slider-label">${config.label}</div>
+                  <input
+                    id="sim-${key}"
+                    class="sim-range"
+                    type="range"
+                    min="${config.min}"
+                    max="${config.max}"
+                    step="${config.step}"
+                    value="${config.value}"
+                    data-sim-key="${key}"
+                  />
+                  <div class="slider-value">${config.display}</div>
+                </label>
+              `,
+            )
+            .join("")}
+        </div>
+        <div class="card pad simulator-result">
+          <div class="metric-label">模拟结果</div>
+          <div class="metric-value" style="color:var(--green)">${formatCurrency(result.forecast)}</div>
+          <div class="muted">Sessions × CVR × AOV</div>
+          <div class="simulator-gap">
+            <span>距离目标</span>
+            <strong style="color:var(--red)">${formatCurrency(result.gap)}</strong>
+          </div>
+          <div class="progress" style="margin-top:12px">
+            <span style="width:${Math.min((result.forecast / Math.max(Number(goal.target_gmv || 1), 1)) * 100, 100)}%"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function updateGrowthSimulator(goal) {
+  const mount = document.querySelector("[data-growth-simulator]");
+  if (!mount || !goal) return;
+  mount.innerHTML = renderGrowthSimulator(goal);
+}
+
 function northstarPage() {
   return `
     <div class="card hero-goal">
@@ -515,7 +657,7 @@ function northstarPage() {
       </div>
       <div style="margin-top:24px">
         <div class="metric-head muted"><span data-goal-progress-label>当前月度能力 <span data-metric="achievement_rate">25.61%</span> / 目标</span><strong><span data-goal-progress-value><span data-metric="gmv">US$256,140.00</span> / US$1,000,000.00</span></strong></div>
-        <div class="progress" style="margin-top:8px"><span style="width:25.6%"></span></div>
+        <div class="progress" style="margin-top:8px"><span data-goal-progress-bar style="width:25.6%"></span></div>
       </div>
     </div>
 
@@ -551,55 +693,45 @@ function northstarPage() {
     </div>
 
     <section class="section">
-      <div class="card pad simulator">
-        <div>
-          <div class="section-title" style="font-size:18px">增长模拟器</div>
-          ${[
-            ["Sessions（月）", "186,780", "36%"],
-            ["CVR", "1.03%", "18%"],
-            ["AOV", "US$186.02", "36%"],
-          ]
-            .map(([label, value, pos]) => `<div class="slider-row"><b>${label}</b><div class="fake-slider" style="--pos:${pos}"></div><b>${value}</b></div>`)
-            .join("")}
-        </div>
-        <div class="card pad" style="background:#f7f8fa">
-          <div class="metric-label">模拟结果</div>
-          <div class="metric-value">US$357,872.00</div>
-          <div class="muted">Sessions × CVR × AOV</div>
-          <div class="delta down" style="margin-top:24px">距离目标 US$642,128.00</div>
-        </div>
+      <div data-growth-simulator>
+        ${renderGrowthSimulator({
+          monthly_sessions_run_rate: 186780,
+          current_cvr: 1.03,
+          current_aov: 186.02,
+          target_gmv: 1000000,
+        })}
       </div>
     </section>
 
-    ${section("Revenue · 收入驱动", "销售额、订单与客单价", pill("Shopify"), `<div class="grid cols-4">
+    <div data-northstar-revenue>${section("Revenue · 收入驱动", "销售额、订单与客单价", pill("Shopify"), `<div class="grid cols-4">
       ${metricCard("总销售额", "US$256,153.98", "-43.64%")}
       ${metricCard("订单数", "1,377", "-23.24%")}
       ${metricCard("客单价", "US$186.02", "-26.57%")}
       ${metricCard("商品总额", "US$296,429.28", "-72.68%")}
       ${metricCard("退款额", "US$978.96", "+63.11%", "Shopify", spikySeries)}
-    </div>`)}
+    </div>`)}</div>
 
-    ${section("Traffic · 流量效率", "获客质量与广告投放效率", `${pill("GA4")} ${pill("Google Ads", "red")} ${pill("Meta Ads", "red")}`, `<div class="grid cols-4">
+    <div data-northstar-traffic>${section("Traffic · 流量效率", "获客质量与广告投放效率", `${pill("GA4")} ${pill("Google Ads", "red")} ${pill("Meta Ads", "red")}`, `<div class="grid cols-4">
       ${metricCard("Sessions", "186,765", "-19.10%", "GA4")}
       ${mockMetric("广告花费", "US$49,197.00")}
       ${mockMetric("CPC", "1.00")}
       ${mockMetric("CPM", "7.00")}
-    </div>`)}
+    </div>`)}</div>
 
-    ${section("Conversion · 转化效率", "站点转化与支付完成", `${pill("Shopify")} ${pill("GA4")}`, `<div class="grid cols-4">
+    <div data-northstar-conversion>${section("Conversion · 转化效率", "站点转化与支付完成", `${pill("Shopify")} ${pill("GA4")}`, `<div class="grid cols-4">
       ${metricCard("CVR", "1.03%", "-15.57%", "Shopify")}
       ${metricCard("加购率", "9.90%", "-22.45%", "GA4")}
       ${metricCard("结账率", "4.50%", "-32.62%", "GA4")}
       ${metricCard("支付完成率", "15.30%", "+32.18%", "GA4")}
-    </div>`)}
+    </div>`)}</div>
 
-    ${section("Customer · 客户质量", "复购、LTV 与客户增长", pill("Shopify"), `<div class="grid cols-4">
+    <div data-northstar-customer>${section("Customer · 客户质量", "复购、LTV 与客户增长", pill("Shopify"), `<div class="grid cols-4">
       ${metricCard("新客销售额", "US$247,427.04", "-22.41%")}
       ${metricCard("回头客销售额", "US$8,726.94", "-93.56%")}
       ${metricCard("新客订单", "1,304", "-24.93%")}
       ${metricCard("回头客订单", "73", "+28.07%")}
       ${metricCard("复购率", "5.30%", "+66.85%")}
-    </div>`)}
+    </div>`)}</div>
   `;
 }
 
@@ -784,13 +916,13 @@ function marketingPage() {
         ["购买", "0.01%", "1,377"],
       ].map(([a,b,c]) => `<div class="funnel-row"><b>${a}</b><div class="funnel-track"><div class="funnel-fill" style="width:${Math.max(parseFloat(b), 1)}%"></div></div><b class="num">${c}</b></div>`).join("")}
     </div>`)}</div>
-    ${section("获客分析", "新客/回头客及广告获客成本", `${pill("Shopify")} ${pill("Google Ads", "red")} ${pill("Meta Ads", "red")}`, `<div class="grid cols-5">
+    <div data-marketing-acquisition>${section("获客分析", "新客/回头客及广告获客成本", `${pill("Shopify")} ${pill("Google Ads", "red")} ${pill("Meta Ads", "red")}`, `<div class="grid cols-5">
       ${metricCard("新客户", "1,304", "-24.93%")}
       ${metricCard("回头客", "73", "+28.07%")}
-      ${mockMetric("CAC", "US$0.00")}
+      ${mockMetric("广告获客成本", "US$0.00")}
       ${metricCard("新客销售额", "US$247,427.04", "-22.42%")}
       ${metricCard("回头客销售额", "US$8,726.94", "-93.56%")}
-    </div>`)}
+    </div>`)}</div>
     ${section("地域表现", "", `${pill("Shopify")} ${pill("Google Ads", "red")} ${pill("Meta Ads", "red")}`, `<div class="grid cols-2">
       ${barChartCard("国家销售额", countryRows.map((r) => [r[0], Number(r[2].replace(/[^0-9.]/g, ""))]))}
       ${mockMetric("区域 ROAS", "0.00")}
@@ -800,13 +932,13 @@ function marketingPage() {
 
 function customersPage() {
   return `
-    ${section("用户概览", "店铺总客户数，为运营分群、复购指标分析提供基础", pill("Shopify"), `<div class="grid cols-5">
+    <div data-customers-overview>${section("用户概览", "店铺总客户数，为运营分群、复购指标分析提供基础", pill("Shopify"), `<div class="grid cols-5">
       ${metricCard("店铺总客户数", "65,580", "+0.00%")}
       ${metricCard("新客户", "1,302", "-25.04%")}
       ${metricCard("回头客", "70", "+27.27%", "Shopify", spikySeries)}
       ${metricCard("复购率", "5.30%", "+66.85%")}
       ${metricCard("新客销售额", "US$247,427.04", "-22.41%")}
-    </div>`)}
+    </div>`)}</div>
     <div class="grid cols-2">
       <div data-customer-segments>${tableCard("用户分群", ["分类", "客户数", "销售额", "占比"], [
         ["单次购买", "1,348", "US$252,365.26", "98.97%"],
@@ -827,12 +959,12 @@ function customersPage() {
       ${barChartCard("渠道客户数", [["Google", 461], ["直接访问", 428], ["Facebook", 253], ["Instagram", 154], ["其他", 43], ["Organic Search", 23]])}
       ${barChartCard("渠道复购率", [["Google", 6.61], ["直接访问", 6.0], ["Facebook", 2.36], ["Instagram", 3.9], ["其他", 6.82], ["Organic Search", 4.35]], "#45bd9d")}
     </div>`)}
-    ${section("用户价值", "人均消费、购买频次、LTV 与二次购买间隔", pill("Shopify"), `<div class="grid cols-4">
+    <div data-customers-value>${section("用户价值", "人均消费、购买频次、LTV 与二次购买间隔", pill("Shopify"), `<div class="grid cols-4">
       ${metricCard("人均消费", "US$188.07", "-26.22%")}
       ${metricCard("LTV（生命周期价值）", "US$76.58", "+0.00%")}
       ${metricCard("购买频次", "1.01", "+0.48%")}
-      ${metricCard("二次购买间隔（天）", "—", "-66.67%")}
-    </div>${tableCard("高价值客户 Top", ["客户", "邮箱", "订单数", "销售额", "LTV", "最近下单"], customerValueRows)}`)}
+      ${metricCard("回头客", "70", "+27.27%")}
+    </div>${tableCard("高价值客户 Top", ["客户", "邮箱", "订单数", "销售额", "LTV", "最近下单"], customerValueRows)}`)}</div>
   `;
 }
 
@@ -865,7 +997,7 @@ function aarrrPage() {
         ["5", "c16 cold press juicer", "/modern/products/c16", "9,574", "5.06%"],
       ])}
     `)}</div>
-    ${stage("R", "Revenue", "收入 · 销售与优惠券", `<div class="grid cols-4">
+    <div data-aarrr-revenue>${stage("R", "Revenue", "收入 · 销售与优惠券", `<div class="grid cols-4">
       ${metricCard("商品总额", "US$296,429.28", "-72.68%")}
       ${metricCard("总销售额", "US$256,153.98", "-43.64%")}
       ${metricCard("订单数", "1,377", "-23.24%")}
@@ -877,14 +1009,14 @@ function aarrrPage() {
       ["新人券", "32", "US$5,609.62", "2.32%"],
       ["活动券", "588", "US$114,514.59", "42.70%"],
       ["达人券", "474", "US$89,006.36", "34.42%"],
-    ])}</div>`)}
-    ${stage("R", "Retention", "留存 · 新老客与复购", `<div class="grid cols-5">
+    ])}</div>`)}</div>
+    <div data-aarrr-retention>${stage("R", "Retention", "留存 · 新老客与复购", `<div class="grid cols-5">
       ${metricCard("新客订单", "1,304", "-24.93%")}
       ${metricCard("回头客订单", "73", "+28.07%", "Shopify", spikySeries)}
       ${metricCard("新客销售额", "US$247,427.04", "-22.43%")}
       ${metricCard("回头客销售额", "US$8,726.94", "-93.56%", "Shopify", spikySeries)}
       ${metricCard("复购率", "5.30%", "+66.67%")}
-    </div>`)}
+    </div>`)}</div>
     ${stage("R", "Referral", "推荐 · 联盟与达人导购", `<div class="grid cols-3">
       ${metricCard("联盟订单", "418", "-47.82%")}
       ${metricCard("联盟销售额", "US$79,166.29", "-43.53%")}
@@ -958,6 +1090,7 @@ function integrationPage() {
       status: "待保存",
       fields: [
         ["shop_domain", "Store Domain · 店铺域名", "bohealthy.myshopify.com"],
+        ["shop_name", "Shop Name · 店铺名称", state.storeName],
         ["client_id", "Client ID · Shopify App Client ID", ""],
         ["client_secret", "Client Secret · 仅服务端保存", ""],
         ["sync_interval", "同步频率", "每天一次"],
@@ -1215,6 +1348,14 @@ app.addEventListener("input", (event) => {
     return;
   }
 
+  if (event.target.matches("[data-sim-key]")) {
+    if (!state.dashboardData?.active_goal) return;
+    const simulator = ensureSimulatorState(state.dashboardData.active_goal);
+    simulator[event.target.dataset.simKey] = Number(event.target.value || 0);
+    updateGrowthSimulator(state.dashboardData.active_goal);
+    return;
+  }
+
   if (!event.target.matches("[data-coupon-search]")) return;
   state.couponQuery = event.target.value;
   updateCouponResults();
@@ -1466,7 +1607,13 @@ async function loadIntegrationConfigs() {
       updateIntegrationField(card, "last_connected_at", formatMaybeDate(item.last_connected_at));
       updateIntegrationField(card, "last_tested_at", formatMaybeDate(item.last_tested_at));
       updateIntegrationField(card, "last_synced_at", formatMaybeDate(item.last_synced_at));
+      if (item.source === "shopify") {
+        const shopName = item.config?.shop_name || data.primary_shop?.shop_name;
+        if (shopName) updateStoreIdentity(shopName);
+      }
     }
+
+    if (data.primary_shop?.shop_name) updateStoreIdentity(data.primary_shop.shop_name);
   } catch {
     // Keep form defaults when API is unavailable.
   }
@@ -1475,6 +1622,17 @@ async function loadIntegrationConfigs() {
 function updateIntegrationSummary(key, value) {
   const node = document.querySelector(`[data-integration-summary="${key}"]`);
   if (node) node.textContent = String(value);
+}
+
+function updateStoreIdentity(name) {
+  const safeName = String(name || "").trim() || "Canoly";
+  state.storeName = safeName;
+  const brand = document.querySelector("[data-brand-title]");
+  const chip = document.querySelector("[data-store-name]");
+  const avatar = document.querySelector("[data-store-avatar]");
+  if (brand) brand.textContent = safeName;
+  if (chip) chip.textContent = safeName;
+  if (avatar) avatar.textContent = initialOf(safeName);
 }
 
 function updateIntegrationField(card, key, value) {
@@ -1602,7 +1760,13 @@ function resolveDateRange() {
 function applyDashboardData(data) {
   const summary = data.summary || {};
   const activeGoal = data.active_goal || null;
+  const customerQuality = data.customer_quality || {};
+  const previous = data.previous || {};
+  const previousSummary = previous.summary || {};
+  const previousCustomerQuality = previous.customer_quality || {};
+  const previousGa4Funnel = previous.ga4_funnel || {};
   const adTotals = buildAdTotals(data.ad_performance || []);
+  const previousAdTotals = buildAdTotals(previous.ad_performance || []);
   const channelMix = buildChannelMix(data.channel_sales || [], data.ad_performance || []);
   const funnelSteps = buildFunnelSteps(data.ga4_funnel || {}, adTotals, summary);
   const values = {
@@ -1611,8 +1775,19 @@ function applyDashboardData(data) {
     orders: formatInteger(summary.orders),
     customers: formatInteger(summary.customers),
     aov: formatCurrency(summary.aov),
+    gross_sales: formatCurrency(summary.gross_sales),
     refunds: formatCurrency(summary.refunds),
     refund_rate: `${formatNumber(summary.refund_rate)}%`,
+    coupon_order_rate: `${formatNumber(summary.coupon_order_rate)}%`,
+    new_customer_revenue: formatCurrency(customerQuality.new_customer_revenue),
+    returning_customer_revenue: formatCurrency(customerQuality.returning_customer_revenue),
+    new_customers: formatInteger(customerQuality.new_customers),
+    returning_customers: formatInteger(customerQuality.returning_customers),
+    new_customer_orders: formatInteger(customerQuality.new_customer_orders),
+    returning_customer_orders: formatInteger(customerQuality.returning_customer_orders),
+    repeat_rate: `${formatNumber(customerQuality.repeat_rate)}%`,
+    avg_customer_value: formatCurrency(customerQuality.avg_customer_value),
+    purchase_frequency: formatNumber(customerQuality.purchase_frequency),
     achievement_rate: `${formatNumber((summary.gmv / 1000000) * 100)}%`,
   };
 
@@ -1620,6 +1795,36 @@ function applyDashboardData(data) {
     const value = values[node.dataset.metric];
     if (value !== undefined) node.textContent = value;
   });
+
+  const cardDelta = {
+    gmv: compareDelta(summary.gmv, previousSummary.gmv),
+    gross_sales: compareDelta(summary.gross_sales, previousSummary.gross_sales),
+    orders: compareDelta(summary.orders, previousSummary.orders),
+    aov: compareDelta(summary.aov, previousSummary.aov),
+    refunds: compareDelta(summary.refunds, previousSummary.refunds),
+    sessions: compareDelta(data.ga4_funnel?.sessions, previousGa4Funnel.sessions),
+    spend: compareDelta(adTotals.spend, previousAdTotals.spend),
+    cpc: compareDelta(adTotals.cpc, previousAdTotals.cpc),
+    cpm: compareDelta(adTotals.cpm, previousAdTotals.cpm),
+    cvr: compareDelta(data.ga4_funnel?.cvr, previousGa4Funnel.cvr),
+    add_to_cart_rate: compareDelta(data.ga4_funnel?.add_to_cart_rate, previousGa4Funnel.add_to_cart_rate),
+    checkout_rate: compareDelta(data.ga4_funnel?.checkout_rate, previousGa4Funnel.checkout_rate),
+    payment_completion_rate: compareDelta(data.ga4_funnel?.payment_completion_rate, previousGa4Funnel.payment_completion_rate),
+    new_customer_revenue: compareDelta(customerQuality.new_customer_revenue, previousCustomerQuality.new_customer_revenue),
+    returning_customer_revenue: compareDelta(customerQuality.returning_customer_revenue, previousCustomerQuality.returning_customer_revenue),
+    new_customers: compareDelta(customerQuality.new_customers, previousCustomerQuality.new_customers),
+    returning_customers: compareDelta(customerQuality.returning_customers, previousCustomerQuality.returning_customers),
+    new_customer_orders: compareDelta(customerQuality.new_customer_orders, previousCustomerQuality.new_customer_orders),
+    returning_customer_orders: compareDelta(customerQuality.returning_customer_orders, previousCustomerQuality.returning_customer_orders),
+    repeat_rate: compareDelta(customerQuality.repeat_rate, previousCustomerQuality.repeat_rate),
+    avg_customer_value: compareDelta(customerQuality.avg_customer_value, previousCustomerQuality.avg_customer_value),
+    purchase_frequency: compareDelta(customerQuality.purchase_frequency, previousCustomerQuality.purchase_frequency),
+    cac: compareDelta(
+      customerQuality.new_customers ? adTotals.spend / customerQuality.new_customers : 0,
+      previousCustomerQuality.new_customers ? previousAdTotals.spend / previousCustomerQuality.new_customers : 0,
+    ),
+    coupon_order_rate: compareDelta(summary.coupon_order_rate, previousSummary.coupon_order_rate),
+  };
 
   const progress = document.querySelector(".progress > span");
   if (progress && activeGoal?.achievement_rate !== undefined) {
@@ -1733,13 +1938,18 @@ function applyDashboardData(data) {
       goalProgressValue.innerHTML = `${formatCurrency(activeGoal.current_goal_gmv)} / ${formatCurrency(activeGoal.target_gmv)}`;
     }
 
+    const goalProgressBar = document.querySelector("[data-goal-progress-bar]");
+    if (goalProgressBar) {
+      goalProgressBar.style.width = `${Math.min(activeGoal.achievement_rate, 100)}%`;
+    }
+
     const goalSummary = document.querySelector("[data-goal-summary]");
     if (goalSummary) {
       goalSummary.innerHTML = [
         ["目标月份", `${formatMonthLabel(activeGoal.start_date)}`],
         ["目标 GMV", formatCurrency(activeGoal.target_gmv)],
         ["当前月度能力", formatCurrency(activeGoal.monthly_gmv_run_rate), "var(--green)"],
-        ["目标差距", formatCurrency(activeGoal.forecast_gap ?? activeGoal.gap), "var(--red)"],
+        ["目标差距", formatCurrency(activeGoal.capability_gap ?? activeGoal.gap), "var(--red)"],
         [`${activeRangeLabel()} GMV`, formatCurrency(activeGoal.current_range_gmv)],
       ]
         .map(
@@ -1776,6 +1986,71 @@ function applyDashboardData(data) {
         ["预测月 GMV", "Forecast Month GMV", formatCurrency(activeGoal.forecast_goal_gmv), "var(--green)"],
       ]);
     }
+
+    ensureSimulatorState(activeGoal);
+    updateGrowthSimulator(activeGoal);
+  }
+
+  const northstarRevenue = document.querySelector("[data-northstar-revenue]");
+  if (northstarRevenue) {
+    northstarRevenue.innerHTML = section(
+      "Revenue · 收入驱动",
+      "销售额、订单与客单价",
+      pill("Shopify"),
+      `<div class="grid cols-4">
+        ${metricCard("总销售额", formatCurrency(summary.gmv), cardDelta.gmv)}
+        ${metricCard("订单数", formatInteger(summary.orders), cardDelta.orders)}
+        ${metricCard("客单价", formatCurrency(summary.aov), cardDelta.aov)}
+        ${metricCard("商品总额", formatCurrency(summary.gross_sales), cardDelta.gross_sales)}
+        ${metricCard("退款额", formatCurrency(summary.refunds), cardDelta.refunds, "Shopify", spikySeries)}
+      </div>`,
+    );
+  }
+
+  const northstarTraffic = document.querySelector("[data-northstar-traffic]");
+  if (northstarTraffic) {
+    northstarTraffic.innerHTML = section(
+      "Traffic · 流量效率",
+      "获客质量与广告投放效率",
+      `${pill("GA4")} ${pill("Google Ads", "red")} ${pill("Meta Ads", "red")}`,
+      `<div class="grid cols-4">
+        ${metricCard("Sessions", formatInteger(data.ga4_funnel?.sessions), cardDelta.sessions, "GA4")}
+        ${metricCard("广告花费", formatCurrency(adTotals.spend), cardDelta.spend, "Ads")}
+        ${metricCard("CPC", formatCurrency(adTotals.cpc), cardDelta.cpc, "Ads")}
+        ${metricCard("CPM", formatCurrency(adTotals.cpm), cardDelta.cpm, "Ads")}
+      </div>`,
+    );
+  }
+
+  const northstarConversion = document.querySelector("[data-northstar-conversion]");
+  if (northstarConversion) {
+    northstarConversion.innerHTML = section(
+      "Conversion · 转化效率",
+      "站点转化与支付完成",
+      `${pill("Shopify")} ${pill("GA4")}`,
+      `<div class="grid cols-4">
+        ${metricCard("CVR", `${formatNumber(data.ga4_funnel?.cvr)}%`, cardDelta.cvr, "GA4")}
+        ${metricCard("加购率", `${formatNumber(data.ga4_funnel?.add_to_cart_rate)}%`, cardDelta.add_to_cart_rate, "GA4")}
+        ${metricCard("结账率", `${formatNumber(data.ga4_funnel?.checkout_rate)}%`, cardDelta.checkout_rate, "GA4")}
+        ${metricCard("支付完成率", `${formatNumber(data.ga4_funnel?.payment_completion_rate)}%`, cardDelta.payment_completion_rate, "GA4")}
+      </div>`,
+    );
+  }
+
+  const northstarCustomer = document.querySelector("[data-northstar-customer]");
+  if (northstarCustomer) {
+    northstarCustomer.innerHTML = section(
+      "Customer · 客户质量",
+      "复购、LTV 与客户增长",
+      pill("Shopify"),
+      `<div class="grid cols-4">
+        ${metricCard("新客销售额", formatCurrency(customerQuality.new_customer_revenue), cardDelta.new_customer_revenue)}
+        ${metricCard("回头客销售额", formatCurrency(customerQuality.returning_customer_revenue), cardDelta.returning_customer_revenue)}
+        ${metricCard("新客订单", formatInteger(customerQuality.new_customer_orders), cardDelta.new_customer_orders)}
+        ${metricCard("回头客订单", formatInteger(customerQuality.returning_customer_orders), cardDelta.returning_customer_orders)}
+        ${metricCard("复购率", `${formatNumber(customerQuality.repeat_rate)}%`, cardDelta.repeat_rate)}
+      </div>`,
+    );
   }
 
   const marketingOverview = document.querySelector("[data-marketing-overview]");
@@ -1785,11 +2060,11 @@ function applyDashboardData(data) {
       "广告平台与站内转化汇总",
       `${pill("Google Ads", "red")} ${pill("Meta Ads", "red")} ${pill("GA4")} ${pill("Shopify")}`,
       `<div class="grid cols-5">
-        ${metricCard("广告花费", formatCurrency(adTotals.spend), adTotals.spend ? "+0.00%" : "0.00%", "Ads", metricSeries)}
-        ${metricCard("销售额", formatCurrency(adTotals.revenue), adTotals.revenue ? "+0.00%" : "0.00%", "Ads", trendSeries)}
-        ${metricCard("ROAS", `${formatNumber(adTotals.roas)}x`, adTotals.roas ? "+0.00%" : "0.00%", "Ads", metricSeries)}
-        ${metricCard("CPA", formatCurrency(adTotals.cpa), adTotals.purchases ? "+0.00%" : "0.00%", "Ads", spikySeries)}
-        ${metricCard("订单数", formatInteger(adTotals.purchases || summary.orders), summary.orders ? "+0.00%" : "0.00%", "Shopify", metricSeries)}
+        ${metricCard("广告花费", formatCurrency(adTotals.spend), cardDelta.spend, "Ads", metricSeries)}
+        ${metricCard("销售额", formatCurrency(adTotals.revenue), compareDelta(adTotals.revenue, previousAdTotals.revenue), "Ads", trendSeries)}
+        ${metricCard("ROAS", `${formatNumber(adTotals.roas)}x`, compareDelta(adTotals.roas, previousAdTotals.roas), "Ads", metricSeries)}
+        ${metricCard("CPA", formatCurrency(adTotals.cpa), compareDelta(adTotals.cpa, previousAdTotals.cpa), "Ads", spikySeries)}
+        ${metricCard("订单数", formatInteger(adTotals.purchases || summary.orders), compareDelta(adTotals.purchases || summary.orders, previousAdTotals.purchases || previousSummary.orders), "Shopify", metricSeries)}
       </div>`,
     );
   }
@@ -1847,11 +2122,11 @@ function applyDashboardData(data) {
       "获取 · 流量与广告投放",
       `
         <div class="grid cols-3">
-          ${metricCard("Sessions", formatInteger(data.ga4_funnel?.sessions), data.ga4_funnel?.sessions ? "+0.00%" : "0.00%", "GA4", metricSeries)}
-          ${metricCard("Users", formatInteger(data.ga4_funnel?.users), data.ga4_funnel?.users ? "+0.00%" : "0.00%", "GA4", trendSeries)}
-          ${metricCard("广告花费", formatCurrency(adTotals.spend), adTotals.spend ? "+0.00%" : "0.00%", "Ads", spikySeries)}
-          ${metricCard("CPC", formatCurrency(adTotals.cpc), adTotals.clicks ? "+0.00%" : "0.00%", "Ads", metricSeries)}
-          ${metricCard("CPM", formatCurrency(adTotals.cpm), adTotals.impressions ? "+0.00%" : "0.00%", "Ads", metricSeries)}
+          ${metricCard("Sessions", formatInteger(data.ga4_funnel?.sessions), cardDelta.sessions, "GA4", metricSeries)}
+          ${metricCard("Users", formatInteger(data.ga4_funnel?.users), compareDelta(data.ga4_funnel?.users, previousGa4Funnel.users), "GA4", trendSeries)}
+          ${metricCard("广告花费", formatCurrency(adTotals.spend), cardDelta.spend, "Ads", spikySeries)}
+          ${metricCard("CPC", formatCurrency(adTotals.cpc), cardDelta.cpc, "Ads", metricSeries)}
+          ${metricCard("CPM", formatCurrency(adTotals.cpm), cardDelta.cpm, "Ads", metricSeries)}
         </div>
         <div class="grid cols-2" style="margin-top:18px">
           ${donutCard(
@@ -1885,9 +2160,9 @@ function applyDashboardData(data) {
       "激活 · 站内转化与落地页",
       `
         <div class="grid cols-3">
-          ${metricCard("加购率", `${formatNumber(data.ga4_funnel?.add_to_cart_rate)}%`, data.ga4_funnel?.add_to_carts ? "+0.00%" : "0.00%", "GA4", metricSeries)}
-          ${metricCard("结账率", `${formatNumber(data.ga4_funnel?.checkout_rate)}%`, data.ga4_funnel?.checkouts ? "+0.00%" : "0.00%", "GA4", trendSeries)}
-          ${metricCard("转化率", `${formatNumber(data.ga4_funnel?.cvr)}%`, data.ga4_funnel?.purchases ? "+0.00%" : "0.00%", "GA4", spikySeries)}
+          ${metricCard("加购率", `${formatNumber(data.ga4_funnel?.add_to_cart_rate)}%`, cardDelta.add_to_cart_rate, "GA4", metricSeries)}
+          ${metricCard("结账率", `${formatNumber(data.ga4_funnel?.checkout_rate)}%`, cardDelta.checkout_rate, "GA4", trendSeries)}
+          ${metricCard("转化率", `${formatNumber(data.ga4_funnel?.cvr)}%`, cardDelta.cvr, "GA4", spikySeries)}
         </div>
         ${tableCard(
           "激活漏斗明细",
@@ -1901,6 +2176,98 @@ function applyDashboardData(data) {
         )}
       `,
       `${pill("GA4")} ${pill("Shopify")}`,
+    );
+  }
+
+  const marketingAcquisition = document.querySelector("[data-marketing-acquisition]");
+  if (marketingAcquisition) {
+    const cac = customerQuality.new_customers ? adTotals.spend / customerQuality.new_customers : 0;
+    marketingAcquisition.innerHTML = section(
+      "获客分析",
+      "新客/回头客及广告获客成本",
+      `${pill("Shopify")} ${pill("Google Ads", "red")} ${pill("Meta Ads", "red")}`,
+      `<div class="grid cols-5">
+        ${metricCard("新客户", formatInteger(customerQuality.new_customers), cardDelta.new_customers)}
+        ${metricCard("回头客", formatInteger(customerQuality.returning_customers), cardDelta.returning_customers)}
+        ${metricCard("广告获客成本", formatCurrency(cac), cardDelta.cac, "Ads")}
+        ${metricCard("新客销售额", formatCurrency(customerQuality.new_customer_revenue), cardDelta.new_customer_revenue)}
+        ${metricCard("回头客销售额", formatCurrency(customerQuality.returning_customer_revenue), cardDelta.returning_customer_revenue)}
+      </div>`,
+    );
+  }
+
+  const customersOverview = document.querySelector("[data-customers-overview]");
+  if (customersOverview) {
+    customersOverview.innerHTML = section(
+      "用户概览",
+      "店铺总客户数，为运营分群、复购指标分析提供基础",
+      pill("Shopify"),
+      `<div class="grid cols-5">
+        ${metricCard("店铺总客户数", formatInteger(summary.customers), compareDelta(summary.customers, previousSummary.customers))}
+        ${metricCard("新客户", formatInteger(customerQuality.new_customers), cardDelta.new_customers)}
+        ${metricCard("回头客", formatInteger(customerQuality.returning_customers), cardDelta.returning_customers, "Shopify", spikySeries)}
+        ${metricCard("复购率", `${formatNumber(customerQuality.repeat_rate)}%`, cardDelta.repeat_rate)}
+        ${metricCard("新客销售额", formatCurrency(customerQuality.new_customer_revenue), cardDelta.new_customer_revenue)}
+      </div>`,
+    );
+  }
+
+  const customersValue = document.querySelector("[data-customers-value]");
+  if (customersValue) {
+    customersValue.innerHTML = section(
+      "用户价值",
+      "人均消费、购买频次、LTV 与回头客表现",
+      pill("Shopify"),
+      `<div class="grid cols-4">
+        ${metricCard("人均消费", formatCurrency(customerQuality.avg_customer_value), cardDelta.avg_customer_value)}
+        ${metricCard("LTV（生命周期价值）", formatCurrency(customerQuality.avg_customer_value), cardDelta.avg_customer_value)}
+        ${metricCard("购买频次", formatNumber(customerQuality.purchase_frequency), cardDelta.purchase_frequency)}
+        ${metricCard("回头客", formatInteger(customerQuality.returning_customers), cardDelta.returning_customers)}
+      </div>${tableCard("高价值客户 Top", ["客户", "邮箱", "订单数", "销售额", "LTV", "最近下单"], customerValueRows)}`,
+    );
+  }
+
+  const aarrrRevenue = document.querySelector("[data-aarrr-revenue]");
+  if (aarrrRevenue) {
+    aarrrRevenue.innerHTML = stage(
+      "R",
+      "Revenue",
+      "收入 · 销售与优惠券",
+      `<div class="grid cols-4">
+        ${metricCard("商品总额", formatCurrency(summary.gross_sales), cardDelta.gross_sales)}
+        ${metricCard("总销售额", formatCurrency(summary.gmv), cardDelta.gmv)}
+        ${metricCard("订单数", formatInteger(summary.orders), cardDelta.orders)}
+        ${metricCard("客单价", formatCurrency(summary.aov), cardDelta.aov)}
+        ${metricCard("退款额", formatCurrency(summary.refunds), cardDelta.refunds, "Shopify", spikySeries)}
+        ${metricCard("用券率", `${formatNumber(summary.coupon_order_rate)}%`, cardDelta.coupon_order_rate)}
+      </div><div data-coupon-usage-breakdown>${tableCard(
+        "优惠券类型分布",
+        ["分类", "订单数", "销售额", "占比"],
+        (data.coupon_usage || []).map((row) => [
+          escapeHtml(row.category),
+          formatInteger(row.orders),
+          formatCurrency(row.revenue),
+          `${formatNumber(row.order_share)}%`,
+        ]),
+      )}</div>`,
+      pill("Shopify"),
+    );
+  }
+
+  const aarrrRetention = document.querySelector("[data-aarrr-retention]");
+  if (aarrrRetention) {
+    aarrrRetention.innerHTML = stage(
+      "R",
+      "Retention",
+      "留存 · 新老客与复购",
+      `<div class="grid cols-5">
+        ${metricCard("新客订单", formatInteger(customerQuality.new_customer_orders), cardDelta.new_customer_orders)}
+        ${metricCard("回头客订单", formatInteger(customerQuality.returning_customer_orders), cardDelta.returning_customer_orders, "Shopify", spikySeries)}
+        ${metricCard("新客销售额", formatCurrency(customerQuality.new_customer_revenue), cardDelta.new_customer_revenue)}
+        ${metricCard("回头客销售额", formatCurrency(customerQuality.returning_customer_revenue), cardDelta.returning_customer_revenue, "Shopify", spikySeries)}
+        ${metricCard("复购率", `${formatNumber(customerQuality.repeat_rate)}%`, cardDelta.repeat_rate)}
+      </div>`,
+      pill("Shopify"),
     );
   }
 
@@ -1922,12 +2289,15 @@ function buildSeriesMap(data) {
   const sales = data.daily_sales || [];
   const ga4 = data.ga4_daily || [];
   const ads = data.ad_daily || [];
+  const customer = data.customer_daily || [];
 
   return {
     gmv: sales.map((row) => ({ label: row.day, value: row.gmv })),
+    gross_sales: sales.map((row) => ({ label: row.day, value: row.gross_sales })),
     orders: sales.map((row) => ({ label: row.day, value: row.orders })),
     aov: sales.map((row) => ({ label: row.day, value: row.aov })),
     refunds: sales.map((row) => ({ label: row.day, value: row.refunds })),
+    coupon_order_rate: sales.map((row) => ({ label: row.day, value: row.coupon_order_rate })),
     sessions: ga4.map((row) => ({ label: row.day, value: row.sessions })),
     users: ga4.map((row) => ({ label: row.day, value: row.users })),
     add_to_cart_rate: ga4.map((row) => ({ label: row.day, value: row.add_to_cart_rate })),
@@ -1939,6 +2309,20 @@ function buildSeriesMap(data) {
     cpm: ads.map((row) => ({ label: row.day, value: row.cpm })),
     roas: ads.map((row) => ({ label: row.day, value: row.roas })),
     cpa: ads.map((row) => ({ label: row.day, value: row.cpa })),
+    new_customer_revenue: customer.map((row) => ({ label: row.day, value: row.new_customer_revenue })),
+    returning_customer_revenue: customer.map((row) => ({ label: row.day, value: row.returning_customer_revenue })),
+    customers: customer.map((row) => ({ label: row.day, value: row.customers })),
+    new_customers: customer.map((row) => ({ label: row.day, value: row.new_customer_orders })),
+    returning_customers: customer.map((row) => ({ label: row.day, value: row.returning_customers })),
+    new_customer_orders: customer.map((row) => ({ label: row.day, value: row.new_customer_orders })),
+    returning_customer_orders: customer.map((row) => ({ label: row.day, value: row.returning_customer_orders })),
+    avg_customer_value: customer.map((row) => ({ label: row.day, value: row.avg_customer_value })),
+    purchase_frequency: customer.map((row) => ({ label: row.day, value: row.purchase_frequency })),
+    repeat_rate: customer.map((row) => ({ label: row.day, value: row.repeat_rate })),
+    cac: customer.map((row) => ({
+      label: row.day,
+      value: row.new_customer_orders ? (ads.find((ad) => ad.day === row.day)?.spend || 0) / row.new_customer_orders : 0,
+    })),
   };
 }
 
@@ -2002,10 +2386,15 @@ function handleSparklineLeave(event) {
 }
 
 function formatTooltipValue(value, key) {
-  if (["gmv", "aov", "refunds", "spend", "cpc", "cpm", "cpa"].includes(key)) return formatCurrency(value);
+  if (["gmv", "gross_sales", "aov", "refunds", "spend", "cpc", "cpm", "cpa", "new_customer_revenue", "returning_customer_revenue"].includes(key)) {
+    return formatCurrency(value);
+  }
   if (key === "roas") return `${formatNumber(value)}x`;
-  if (["cvr", "add_to_cart_rate", "checkout_rate", "payment_completion_rate"].includes(key)) {
+  if (["cvr", "add_to_cart_rate", "checkout_rate", "payment_completion_rate", "repeat_rate"].includes(key)) {
     return `${formatNumber(value)}%`;
+  }
+  if (["orders", "sessions", "users", "new_customer_orders", "returning_customer_orders"].includes(key)) {
+    return formatInteger(value);
   }
   return formatNumber(value);
 }
@@ -2102,6 +2491,16 @@ function normalizeChannel(value) {
     .replace(/[_\s-]+/g, "");
 }
 
+function compareDelta(current, previous) {
+  const currentValue = Number(current || 0);
+  const previousValue = Number(previous || 0);
+  if (previousValue === 0 && currentValue === 0) return "0.00%";
+  if (previousValue === 0) return "+100.00%";
+  const delta = ((currentValue - previousValue) / Math.abs(previousValue)) * 100;
+  const sign = delta >= 0 ? "+" : "";
+  return `${sign}${formatNumber(delta)}%`;
+}
+
 function formatCurrency(value) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -2156,6 +2555,10 @@ function escapeHtml(value) {
 
 function escapeAttr(value) {
   return String(value ?? "").replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+}
+
+function initialOf(value) {
+  return String(value || "C").trim().charAt(0).toUpperCase() || "C";
 }
 
 render();

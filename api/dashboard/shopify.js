@@ -7,17 +7,24 @@ module.exports = async function handler(req, res) {
     assertEnv();
 
     const range = readDateRange(req.query);
+    const previousRange = derivePreviousRange(range);
     const [
       orderRows,
+      previousOrderRows,
       lineItemRows,
       couponRows,
       ga4Rows,
+      previousGa4Rows,
       adRows,
+      previousAdRows,
       goalRows,
       syncRows,
     ] = await Promise.all([
       supabaseFetch(
-        `/rest/v1/orders?select=id,customer_id,total_price,total_refunded,created_at,source_name,customer_country,discount_codes&created_at=gte.${encodeURIComponent(range.startIso)}&created_at=lte.${encodeURIComponent(range.endIso)}&limit=20000`,
+        `/rest/v1/orders?select=id,customer_id,total_price,subtotal_price,total_refunded,created_at,source_name,customer_country,discount_codes&created_at=gte.${encodeURIComponent(range.startIso)}&created_at=lte.${encodeURIComponent(range.endIso)}&limit=20000`,
+      ),
+      supabaseFetch(
+        `/rest/v1/orders?select=id,customer_id,total_price,subtotal_price,total_refunded,created_at,source_name,customer_country,discount_codes&created_at=gte.${encodeURIComponent(previousRange.startIso)}&created_at=lte.${encodeURIComponent(previousRange.endIso)}&limit=20000`,
       ),
       supabaseFetch("/rest/v1/order_line_items?select=order_id,title,sku,quantity,price&limit=30000"),
       supabaseFetch("/rest/v1/coupon_codes?select=code,category&limit=10000"),
@@ -25,7 +32,13 @@ module.exports = async function handler(req, res) {
         `/rest/v1/ga4_daily_metrics?select=day,sessions,users,add_to_carts,checkouts,purchases&day=gte.${range.start}&day=lte.${range.end}&limit=10000`,
       ),
       supabaseFetch(
+        `/rest/v1/ga4_daily_metrics?select=day,sessions,users,add_to_carts,checkouts,purchases&day=gte.${previousRange.start}&day=lte.${previousRange.end}&limit=10000`,
+      ),
+      supabaseFetch(
         `/rest/v1/ad_daily_metrics?select=day,source,spend,revenue,impressions,clicks,purchases&day=gte.${range.start}&day=lte.${range.end}&limit=10000`,
+      ),
+      supabaseFetch(
+        `/rest/v1/ad_daily_metrics?select=day,source,spend,revenue,impressions,clicks,purchases&day=gte.${previousRange.start}&day=lte.${previousRange.end}&limit=10000`,
       ),
       supabaseFetch(
         "/rest/v1/goals?or=(is_active.eq.true,status.eq.active)&select=id,name,description,start_date,end_date,target_gmv,status,is_active&order=is_active.desc,start_date.asc&limit=1",
@@ -43,11 +56,16 @@ module.exports = async function handler(req, res) {
     const topProducts = buildTopProducts(filteredLineItems);
     const countrySales = buildCountrySales(orderRows);
     const customerSegments = buildCustomerSegments(orderRows);
+    const customerQuality = buildCustomerQuality(orderRows);
+    const previousSummary = summarizeOrders(previousOrderRows);
+    const previousCustomerQuality = buildCustomerQuality(previousOrderRows);
     const couponUsage = buildCouponUsage(orderRows, couponRows);
     const channelSales = buildChannelSales(orderRows);
     const ga4Funnel = buildGa4Funnel(ga4Rows);
+    const previousGa4Funnel = buildGa4Funnel(previousGa4Rows);
     const ga4Daily = buildGa4Daily(ga4Rows);
     const adPerformance = buildAdPerformance(adRows);
+    const previousAdPerformance = buildAdPerformance(previousAdRows);
     const adDaily = buildAdDaily(adRows);
     const sync = buildSyncSummary(syncRows);
     const activeGoal = await buildActiveGoal(goalRows[0], range, summary, ga4Funnel);
@@ -60,12 +78,21 @@ module.exports = async function handler(req, res) {
       top_products: topProducts,
       country_sales: countrySales,
       customer_segments: customerSegments,
+      customer_quality: customerQuality.summary,
+      customer_daily: customerQuality.daily,
       coupon_usage: couponUsage,
       channel_sales: channelSales,
       ga4_funnel: ga4Funnel,
       ga4_daily: ga4Daily,
       ad_performance: adPerformance,
       ad_daily: adDaily,
+      previous: {
+        range: previousRange,
+        summary: previousSummary,
+        customer_quality: previousCustomerQuality.summary,
+        ga4_funnel: previousGa4Funnel,
+        ad_performance: previousAdPerformance,
+      },
       active_goal: activeGoal,
       sync,
     });
@@ -111,6 +138,23 @@ function readDateRange(query) {
   };
 }
 
+function derivePreviousRange(range) {
+  const days = inclusiveDays(range.start, range.end);
+  const startDate = new Date(`${range.start}T00:00:00Z`);
+  const previousEndDate = new Date(startDate);
+  previousEndDate.setUTCDate(previousEndDate.getUTCDate() - 1);
+  const previousStartDate = new Date(previousEndDate);
+  previousStartDate.setUTCDate(previousStartDate.getUTCDate() - (days - 1));
+  const start = toDateOnly(previousStartDate);
+  const end = toDateOnly(previousEndDate);
+  return {
+    start,
+    end,
+    startIso: `${start}T00:00:00.000Z`,
+    endIso: `${end}T23:59:59.999Z`,
+  };
+}
+
 function sanitizeDate(value) {
   const text = String(value || "").trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
@@ -128,25 +172,30 @@ function summarizeOrders(rows) {
   const summary = rows.reduce(
     (result, row) => {
       const total = number(row.total_price);
+      const gross = number(row.subtotal_price || row.total_price);
       const refunded = number(row.total_refunded);
       result.orders += 1;
       result.gmv += total;
+      result.gross_sales += gross;
       result.net_sales += total - refunded;
       result.refunds += refunded;
+      if (Array.isArray(row.discount_codes) && row.discount_codes.length) result.coupon_orders += 1;
       if (row.customer_id) result.customerIds.add(row.customer_id);
       return result;
     },
-    { orders: 0, gmv: 0, net_sales: 0, refunds: 0, customerIds: new Set() },
+    { orders: 0, gmv: 0, gross_sales: 0, net_sales: 0, refunds: 0, coupon_orders: 0, customerIds: new Set() },
   );
 
   return {
     gmv: round(summary.gmv),
+    gross_sales: round(summary.gross_sales),
     net_sales: round(summary.net_sales),
     orders: summary.orders,
     customers: summary.customerIds.size,
     aov: round(summary.orders ? summary.gmv / summary.orders : 0),
     refunds: round(summary.refunds),
     refund_rate: round(summary.gmv ? (summary.refunds / summary.gmv) * 100 : 0),
+    coupon_order_rate: round(summary.orders ? (summary.coupon_orders / summary.orders) * 100 : 0),
   };
 }
 
@@ -156,13 +205,24 @@ function buildDailySales(rows) {
     const day = String(row.created_at || "").slice(0, 10);
     if (!day) return;
     if (!grouped.has(day)) {
-      grouped.set(day, { day, orders: 0, customers: new Set(), gmv: 0, aovSeed: 0, refunds: 0 });
+      grouped.set(day, {
+        day,
+        orders: 0,
+        customers: new Set(),
+        gmv: 0,
+        gross_sales: 0,
+        aovSeed: 0,
+        refunds: 0,
+        coupon_orders: 0,
+      });
     }
     const item = grouped.get(day);
     item.orders += 1;
     item.gmv += number(row.total_price);
+    item.gross_sales += number(row.subtotal_price || row.total_price);
     item.aovSeed += number(row.total_price);
     item.refunds += number(row.total_refunded);
+    if (Array.isArray(row.discount_codes) && row.discount_codes.length) item.coupon_orders += 1;
     if (row.customer_id) item.customers.add(row.customer_id);
   });
 
@@ -172,8 +232,10 @@ function buildDailySales(rows) {
       orders: item.orders,
       customers: item.customers.size,
       gmv: round(item.gmv),
+      gross_sales: round(item.gross_sales),
       aov: round(item.orders ? item.aovSeed / item.orders : 0),
       refunds: round(item.refunds),
+      coupon_order_rate: round(item.orders ? (item.coupon_orders / item.orders) * 100 : 0),
     }))
     .sort((a, b) => a.day.localeCompare(b.day));
 }
@@ -263,6 +325,104 @@ function buildCustomerSegments(rows) {
       avg_customer_value: round(item.customers ? item.revenue / item.customers : 0),
     }))
     .sort((a, b) => b.revenue - a.revenue);
+}
+
+function buildCustomerQuality(rows) {
+  const byCustomer = new Map();
+  rows.forEach((row) => {
+    if (!row.customer_id) return;
+    if (!byCustomer.has(row.customer_id)) byCustomer.set(row.customer_id, []);
+    byCustomer.get(row.customer_id).push(row);
+  });
+
+  const summary = {
+    new_customer_revenue: 0,
+    returning_customer_revenue: 0,
+    new_customer_orders: 0,
+    returning_customer_orders: 0,
+    total_customers: byCustomer.size,
+    returning_customers: 0,
+  };
+  const daily = new Map();
+
+  byCustomer.forEach((orders) => {
+    const sorted = [...orders].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    if (sorted.length > 1) summary.returning_customers += 1;
+
+    sorted.forEach((order, index) => {
+      const day = String(order.created_at || "").slice(0, 10);
+      if (!day) return;
+      if (!daily.has(day)) {
+        daily.set(day, {
+          day,
+          new_customer_revenue: 0,
+          returning_customer_revenue: 0,
+          new_customer_orders: 0,
+          returning_customer_orders: 0,
+          customer_ids: new Set(),
+          returning_customer_ids: new Set(),
+        });
+      }
+      const bucket = daily.get(day);
+      const total = number(order.total_price);
+      bucket.customer_ids.add(order.customer_id);
+      if (index === 0) {
+        summary.new_customer_revenue += total;
+        summary.new_customer_orders += 1;
+        bucket.new_customer_revenue += total;
+        bucket.new_customer_orders += 1;
+      } else {
+        summary.returning_customer_revenue += total;
+        summary.returning_customer_orders += 1;
+        bucket.returning_customer_revenue += total;
+        bucket.returning_customer_orders += 1;
+        bucket.returning_customer_ids.add(order.customer_id);
+      }
+    });
+  });
+
+  const repeatRate = round(summary.total_customers ? (summary.returning_customers / summary.total_customers) * 100 : 0);
+  const newCustomers = Math.max(summary.total_customers - summary.returning_customers, 0);
+  const avgCustomerValue = round(summary.total_customers ? (summary.new_customer_revenue + summary.returning_customer_revenue) / summary.total_customers : 0);
+  const purchaseFrequency = round(summary.total_customers ? (summary.new_customer_orders + summary.returning_customer_orders) / summary.total_customers : 0);
+
+  return {
+    summary: {
+      new_customers: newCustomers,
+      new_customer_revenue: round(summary.new_customer_revenue),
+      returning_customer_revenue: round(summary.returning_customer_revenue),
+      new_customer_orders: summary.new_customer_orders,
+      returning_customer_orders: summary.returning_customer_orders,
+      returning_customers: summary.returning_customers,
+      total_customers: summary.total_customers,
+      repeat_rate: repeatRate,
+      avg_customer_value: avgCustomerValue,
+      purchase_frequency: purchaseFrequency,
+    },
+    daily: Array.from(daily.values())
+      .map((item) => ({
+        day: item.day,
+        customers: item.customer_ids.size,
+        returning_customers: item.returning_customer_ids.size,
+        new_customer_revenue: round(item.new_customer_revenue),
+        returning_customer_revenue: round(item.returning_customer_revenue),
+        new_customer_orders: item.new_customer_orders,
+        returning_customer_orders: item.returning_customer_orders,
+        total_orders: item.new_customer_orders + item.returning_customer_orders,
+        avg_customer_value: round(
+          item.customer_ids.size ? (item.new_customer_revenue + item.returning_customer_revenue) / item.customer_ids.size : 0,
+        ),
+        purchase_frequency: round(
+          item.customer_ids.size ? (item.new_customer_orders + item.returning_customer_orders) / item.customer_ids.size : 0,
+        ),
+        repeat_rate: round(
+          item.customer_ids.size
+            ? (item.returning_customer_ids.size / item.customer_ids.size) * 100
+            : 0,
+        ),
+      }))
+      .sort((a, b) => a.day.localeCompare(b.day)),
+  };
 }
 
 function buildCouponUsage(orderRows, couponRows) {
@@ -481,6 +641,7 @@ async function buildActiveGoal(goalRow, range, summary, ga4Funnel) {
   const forecastGoalGmv = round(monthlySessionsRunRate * (cvr / 100) * aov);
   const forecastGap = round(Math.max(targetGmv - forecastGoalGmv, 0));
   const actualGap = round(Math.max(targetGmv - currentGoalGmv, 0));
+  const capabilityGap = round(Math.max(targetGmv - monthlyGmvRunRate, 0));
   const now = toDateOnly(new Date());
   const elapsedGoalDays = clampInclusiveDays(goalStart, now, goalEnd);
   const elapsedRate = round(goalDays ? (elapsedGoalDays / goalDays) * 100 : 0);
@@ -499,7 +660,8 @@ async function buildActiveGoal(goalRow, range, summary, ga4Funnel) {
     current_range_orders: Number(summary.orders || 0),
     current_range_sessions: selectedSessions,
     achievement_rate: achievementRate,
-    gap: forecastGap,
+    gap: capabilityGap,
+    capability_gap: capabilityGap,
     forecast_gap: forecastGap,
     actual_gap: actualGap,
     goal_days: goalDays,

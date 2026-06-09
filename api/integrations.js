@@ -3,13 +3,17 @@ module.exports = async function handler(req, res) {
     assertEnv();
 
     if (req.method === "GET") {
-      const rows = await supabaseFetch("/rest/v1/data_integrations?select=id,source,status,config,last_connected_at,last_tested_at,last_synced_at,updated_at&order=source.asc");
+      const [rows, shops] = await Promise.all([
+        supabaseFetch("/rest/v1/data_integrations?select=id,source,status,config,last_connected_at,last_tested_at,last_synced_at,updated_at&order=source.asc"),
+        supabaseFetch("/rest/v1/shops?select=id,shop_domain,shop_name&order=updated_at.desc&limit=1"),
+      ]);
       return res.status(200).json({
         ok: true,
         integrations: rows.map((row) => ({
           ...row,
           config: redactConfig(row.config || {}),
         })),
+        primary_shop: shops[0] || null,
       });
     }
 
@@ -22,7 +26,9 @@ module.exports = async function handler(req, res) {
       const current = await getIntegration(source);
       const currentConfig = current?.config || {};
       const nextConfig = mergeConfig(currentConfig, body.config || {});
+      const shopId = source === "shopify" ? await upsertPrimaryShop(nextConfig) : current?.shop_id || null;
       const row = {
+        ...(shopId ? { shop_id: shopId } : {}),
         source,
         status: body.status || "connected",
         config: nextConfig,
@@ -83,9 +89,34 @@ function assertAuthorized(req) {
 
 async function getIntegration(source) {
   const rows = await supabaseFetch(
-    `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}&select=id,config&limit=1`,
+    `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}&select=id,shop_id,config&limit=1`,
   );
   return rows[0] || null;
+}
+
+async function upsertPrimaryShop(config) {
+  const shopDomain = String(config.shop_domain || "").trim();
+  const shopName = String(config.shop_name || "").trim();
+  if (!shopDomain && !shopName) return null;
+
+  const domain = shopDomain || `manual-${Date.now()}.local`;
+  await supabaseFetch("/rest/v1/shops?on_conflict=shop_domain", {
+    method: "POST",
+    headers: {
+      prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify([
+      {
+        shop_domain: domain,
+        shop_name: shopName || domain,
+      },
+    ]),
+  });
+
+  const rows = await supabaseFetch(
+    `/rest/v1/shops?shop_domain=eq.${encodeURIComponent(domain)}&select=id,shop_name&limit=1`,
+  );
+  return rows[0]?.id || null;
 }
 
 function mergeConfig(current, incoming) {

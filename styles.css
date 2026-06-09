@@ -31,7 +31,7 @@ body {
   margin: 0;
   color: var(--text);
   background: var(--bg);
-  font-size: 13.5px;
+  font-size: 13px;
 }
 
 button,
@@ -88,7 +88,7 @@ button {
 
 .brand-title {
   font-weight: 800;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .brand-subtitle,
@@ -190,14 +190,14 @@ button {
 }
 
 .page-title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 800;
   line-height: 1.1;
 }
 
 .page-kicker {
   margin-top: 5px;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .top-actions {
@@ -284,6 +284,22 @@ button {
   font-weight: 800;
 }
 
+.store-chip {
+  max-width: 180px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: #42505f;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .content {
   padding: 26px 28px 58px;
   max-width: 1460px;
@@ -313,7 +329,7 @@ button {
   background: transparent;
   color: #6b7280;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .source-tabs button.active {
@@ -349,7 +365,7 @@ button {
 }
 
 .section-title {
-  font-size: 19px;
+  font-size: 17px;
   font-weight: 800;
 }
 
@@ -456,7 +472,7 @@ button {
 
 .metric-value {
   font-weight: 850;
-  font-size: 23px;
+  font-size: 21px;
   letter-spacing: 0;
   color: #101820;
 }
@@ -660,7 +676,7 @@ tr:last-child td {
 }
 
 .goal-title {
-  font-size: 21px;
+  font-size: 19px;
   font-weight: 850;
   margin: 8px 0;
 }
@@ -693,24 +709,70 @@ tr:last-child td {
   margin: 22px 0;
 }
 
-.fake-slider {
-  height: 8px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--green) var(--pos), #d8dde3 var(--pos));
-  position: relative;
+.slider-label {
+  font-weight: 700;
+  color: #2b3440;
 }
 
-.fake-slider::after {
-  content: "";
-  position: absolute;
-  left: var(--pos);
-  top: 50%;
-  width: 14px;
-  height: 14px;
-  margin-left: -7px;
-  margin-top: -7px;
+.slider-value {
+  text-align: right;
+  font-weight: 700;
+  color: #2b3440;
+}
+
+.sim-range {
+  width: 100%;
+  accent-color: var(--green);
+  cursor: pointer;
+}
+
+.sim-range::-webkit-slider-runnable-track {
+  height: 8px;
+  background: #d8dde3;
   border-radius: 999px;
+}
+
+.sim-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
   background: var(--green);
+  margin-top: -4px;
+  border: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.sim-range::-moz-range-track {
+  height: 8px;
+  background: #d8dde3;
+  border-radius: 999px;
+}
+
+.sim-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--green);
+  border: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.simulator-result {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.simulator-gap {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
 }
 
 .mock-card {
