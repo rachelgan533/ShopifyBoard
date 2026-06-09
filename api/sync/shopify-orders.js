@@ -23,7 +23,6 @@ const SHOPIFY_ORDER_QUERY = `
           displayFulfillmentStatus
           sourceName
           landingPageUrl
-          referringSite
           discountCodes
           totalPriceSet {
             shopMoney {
@@ -372,7 +371,7 @@ function mapOrders(shopId, orders) {
       customer_city: order.shippingAddress?.city || address.city,
       source_name: order.sourceName,
       landing_site: order.landingPageUrl,
-      referring_site: order.referringSite,
+      referring_site: null,
       discount_codes: order.discountCodes || [],
       raw: order,
       synced_at: new Date().toISOString(),
