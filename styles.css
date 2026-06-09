@@ -471,10 +471,15 @@ button {
   color: var(--red);
 }
 
-.sparkline {
+.sparkline-wrap {
+  position: relative;
   margin-top: 20px;
+}
+
+.sparkline {
   width: 100%;
   height: 48px;
+  display: block;
 }
 
 .sparkline path.line {
@@ -488,6 +493,31 @@ button {
 
 .sparkline path.fill {
   fill: url(#sparkGradient);
+}
+
+.sparkline-tooltip {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  transform: translateX(-50%);
+  min-width: 104px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(17, 24, 39, 0.94);
+  color: #fff;
+  font-size: 12px;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.22);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  display: grid;
+  gap: 3px;
+  z-index: 3;
+}
+
+.sparkline-tooltip strong {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .chart-card {
@@ -783,13 +813,27 @@ tr:last-child td {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
-  height: 40px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: #fff;
   padding: 0 12px;
+}
+
+.field input,
+.field select {
+  height: 40px;
+}
+
+.field textarea {
+  min-height: 132px;
+  padding: 12px;
+  resize: vertical;
+  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
 }
 
 .button-row {
@@ -852,6 +896,39 @@ tr:last-child td {
 .toast.show {
   opacity: 1;
   transform: translateY(0);
+}
+
+.date-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.16);
+  z-index: 35;
+}
+
+.date-picker-panel {
+  position: fixed;
+  top: 112px;
+  right: 108px;
+  width: min(640px, calc(100vw - 48px));
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 22px 54px rgba(15, 23, 42, 0.14);
+  z-index: 36;
+  padding: 22px;
+}
+
+.date-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
 .map-panel {
@@ -947,6 +1024,12 @@ tr:last-child td {
     padding: 18px;
   }
 
+  .date-picker-panel {
+    right: 24px;
+    left: 24px;
+    width: auto;
+  }
+
   .cols-5,
   .cols-4,
   .cols-3,
@@ -981,6 +1064,10 @@ tr:last-child td {
   .slider-row,
   .funnel-row,
   .bar-row {
+    grid-template-columns: 1fr;
+  }
+
+  .date-picker-grid {
     grid-template-columns: 1fr;
   }
 

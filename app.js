@@ -103,10 +103,16 @@ const couponRows = [
 const app = document.querySelector("#app");
 const state = {
   range: "近 30 天",
+  customRange: {
+    start: "",
+    end: "",
+  },
+  datePickerOpen: false,
   sourceTab: "总览",
   couponQuery: "",
   couponFilter: "all",
   dashboardData: null,
+  dashboardDataKey: "",
   couponsData: null,
   integrationSecret: "",
 };
@@ -130,8 +136,9 @@ function layout(content) {
     <div class="app-shell">
       ${sidebar(page)}
       <main class="main">
-        ${topbar(title, kicker, page)}
+        ${topbar(title, resolveKicker(kicker, page), page)}
         <div class="content">${content}</div>
+        ${dateRangePicker()}
       </main>
     </div>
   `;
@@ -201,6 +208,46 @@ function topbar(title, kicker, page) {
   `;
 }
 
+function resolveKicker(kicker, page) {
+  if (["northstar", "personas", "operations", "marketing", "customers", "aarrr"].includes(page)) {
+    return `${activeRangeLabel()} · ${kicker.replace(/^近 30 天 · /, "").replace(/^近 30 天/, "").trim().replace(/^·\s*/, "")}`;
+  }
+  return kicker;
+}
+
+function activeRangeLabel() {
+  if (state.range !== "自定义") return state.range;
+  if (!state.customRange.start || !state.customRange.end) return "自定义";
+  return `${state.customRange.start} → ${state.customRange.end}`;
+}
+
+function dateRangePicker() {
+  if (!state.datePickerOpen) return "";
+  return `
+    <div class="date-picker-backdrop" data-action="close-date-picker"></div>
+    <div class="date-picker-panel">
+      <div class="date-picker-head">
+        <div class="section-title">自定义时间范围</div>
+        <button class="icon-btn" data-action="close-date-picker" title="关闭">×</button>
+      </div>
+      <div class="date-picker-grid">
+        <div class="field">
+          <label>开始日期</label>
+          <input type="date" data-custom-start value="${state.customRange.start}" />
+        </div>
+        <div class="field">
+          <label>结束日期</label>
+          <input type="date" data-custom-end value="${state.customRange.end}" />
+        </div>
+      </div>
+      <div class="button-row" style="justify-content:flex-end">
+        <button class="ghost-btn" data-action="close-date-picker">取消</button>
+        <button class="primary-btn" data-action="apply-date-range">应用</button>
+      </div>
+    </div>
+  `;
+}
+
 function settingsActions(page) {
   if (page === "goals") return `<button class="primary-btn" data-action="new-goal">＋ 新增目标</button>`;
   if (page === "coupons")
@@ -238,7 +285,7 @@ function metricCard(label, value, delta = "+0.00%", source = "Shopify", series =
   const down = String(delta).includes("-");
   const key = metricKey(label);
   return `
-    <div class="card metric-card">
+    <div class="card metric-card" ${key ? `data-series-key="${key}"` : ""}>
       <div class="metric-head">
         <div>
           <div class="metric-label">${label}</div>
@@ -249,7 +296,7 @@ function metricCard(label, value, delta = "+0.00%", source = "Shopify", series =
           <div class="delta ${down ? "down" : ""}" style="margin-top:18px">${down ? "↘" : "↗"} ${delta}</div>
         </div>
       </div>
-      ${sparkline(series)}
+      ${sparkline(series, key)}
       <div class="small-label">较上期</div>
     </div>
   `;
@@ -258,51 +305,70 @@ function metricCard(label, value, delta = "+0.00%", source = "Shopify", series =
 function metricKey(label) {
   return {
     总销售额: "gmv",
+    商品总额: "gmv",
     订单数: "orders",
     客单价: "aov",
     退款额: "refunds",
     新客户: "customers",
     店铺总客户数: "customers",
+    Sessions: "sessions",
+    Users: "users",
+    广告花费: "spend",
+    CPC: "cpc",
+    CPM: "cpm",
+    ROAS: "roas",
+    CPA: "cpa",
+    CVR: "cvr",
+    转化率: "cvr",
+    加购率: "add_to_cart_rate",
+    结账率: "checkout_rate",
+    支付完成率: "payment_completion_rate",
   }[label];
 }
 
 function mockMetric(label, value, source = "Google Ads", series = [24, 24, 24, 24, 24, 24]) {
+  const key = metricKey(label);
   return `
-    <div class="card mock-card">
+    <div class="card mock-card" ${key ? `data-series-key="${key}"` : ""}>
       <div class="mock-head"><span>MOCK DATA</span><span>演示数据</span></div>
       <div class="mock-tags"><span class="mock-tag">${source}</span><span class="mock-tag">Meta Ads</span></div>
       <div class="metric-card">
         <div class="metric-label">${label}</div>
         <div class="metric-value">${value}</div>
         <div class="delta" style="float:right">↗ +0.00%</div>
-        ${sparkline(series)}
+        ${sparkline(series, key)}
         <div class="small-label">较上期</div>
       </div>
     </div>
   `;
 }
 
-function sparkline(points) {
-  const max = Math.max(...points);
-  const min = Math.min(...points);
-  const coords = points.map((p, i) => {
-    const x = (i / (points.length - 1)) * 100;
+function sparkline(points, key = "") {
+  const series = normalizeSparklineSeries(points);
+  const values = series.map((point) => Number(point.value || 0));
+  const max = Math.max(...values, 0);
+  const min = Math.min(...values, 0);
+  const coords = values.map((p, i) => {
+    const x = (i / Math.max(values.length - 1, 1)) * 100;
     const y = 42 - ((p - min) / (max - min || 1)) * 34;
     return [x, y];
   });
   const line = smoothPath(coords);
   const fill = `${line} L100,46 L0,46 Z`;
   return `
-    <svg class="sparkline" viewBox="0 0 100 46" preserveAspectRatio="none" aria-hidden="true">
-      <defs>
-        <linearGradient id="sparkGradient" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stop-color="#19a186" stop-opacity=".18"/>
-          <stop offset="100%" stop-color="#19a186" stop-opacity="0"/>
-        </linearGradient>
-      </defs>
-      <path class="fill" d="${fill}"></path>
-      <path class="line" d="${line}"></path>
-    </svg>
+    <div class="sparkline-wrap" ${key ? `data-series-key="${key}"` : ""} data-series="${escapeAttr(JSON.stringify(series))}">
+      <svg class="sparkline" viewBox="0 0 100 46" preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="sparkGradient" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#19a186" stop-opacity=".18"/>
+            <stop offset="100%" stop-color="#19a186" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path class="fill" d="${fill}"></path>
+        <path class="line" d="${line}"></path>
+      </svg>
+      <div class="sparkline-tooltip"></div>
+    </div>
   `;
 }
 
@@ -409,25 +475,51 @@ function tableMarkup(headers, rows) {
   `;
 }
 
+function goalBreakdownPanel(title, subtitle, rows) {
+  return `
+    <div class="card pad breakdown-panel">
+      <div class="section-head">
+        <div>
+          <div class="section-title">${title}</div>
+          <div class="section-subtitle">${subtitle}</div>
+        </div>
+      </div>
+      <div class="grid cols-2">
+        ${rows
+          .map(
+            ([label, english, value, accent]) => `
+              <div class="card pad breakdown-card">
+                <div class="metric-label">${label}</div>
+                <div class="muted">${english}</div>
+                <div class="metric-value" style="${accent ? `color:${accent}` : ""}">${value}</div>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
 function northstarPage() {
   return `
     <div class="card hero-goal">
       <div class="metric-head">
         <div>
           <div class="muted">增长目标 Growth Goal</div>
-          <div class="goal-title">2026年9月 GMV百万计划</div>
-          <div class="muted">目标周期 2026-09-01 → 2026-09-30 · 目标 GMV US$1,000,000.00</div>
+          <div class="goal-title" data-goal-name>2026年9月 GMV百万计划</div>
+          <div class="muted" data-goal-period>目标周期 2026-09-01 → 2026-09-30 · 目标 GMV US$1,000,000.00</div>
           <div style="margin-top:12px">${pill("Shopify")} ${pill("GA4")}</div>
         </div>
-        ${pill("严重偏离 Off Track", "red")}
+        <span data-goal-status>${pill("严重偏离 Off Track", "red")}</span>
       </div>
       <div style="margin-top:24px">
-        <div class="metric-head muted"><span>当前月度能力 <span data-metric="achievement_rate">25.61%</span> / 目标</span><strong><span data-metric="gmv">US$256,140.00</span> / US$1,000,000.00</strong></div>
+        <div class="metric-head muted"><span data-goal-progress-label>当前月度能力 <span data-metric="achievement_rate">25.61%</span> / 目标</span><strong><span data-goal-progress-value><span data-metric="gmv">US$256,140.00</span> / US$1,000,000.00</span></strong></div>
         <div class="progress" style="margin-top:8px"><span style="width:25.6%"></span></div>
       </div>
     </div>
 
-    <div class="grid cols-5" style="margin:18px 0 28px">
+    <div class="grid cols-5" style="margin:18px 0 28px" data-goal-summary>
       ${[
         ["目标月份", "2026年9月"],
         ["目标 GMV", "US$1,000,000.00"],
@@ -440,22 +532,22 @@ function northstarPage() {
     </div>
 
     <div class="grid cols-2">
-      ${tableCard("目标拆解", ["指标", "当前值"], [
-        ["达标所需日均 GMV", "US$33,333.00"],
-        ["达标所需日均订单数", "179"],
-        ["达标所需月订单数", "5,376"],
-        ["达标所需 Sessions", "521,942"],
-        ["当前 AOV", "US$186.02"],
-        ["当前 CVR", "1.03%"],
-      ])}
-      ${tableCard("当前能力评估", ["指标", "当前值"], [
-        ["当前月 GMV Run Rate", "US$256,140.00"],
-        ["当前月度订单 Run Rate", "1,377"],
-        ["当前月 Sessions Run Rate", "186,780"],
-        ["当前 CVR", "1.03%"],
-        ["当前 AOV", "US$186.02"],
-        ["预测 2026年9月 GMV", "US$357,872.00"],
-      ])}
+      <div data-goal-breakdown>${goalBreakdownPanel("目标拆解", "Target Breakdown", [
+        ["达标所需日均 GMV", "Required Daily GMV", "US$33,333.00"],
+        ["达标所需日均订单数", "Required Daily Orders", "179"],
+        ["达标所需月订单数", "Required Monthly Orders", "5,376"],
+        ["达标所需 Sessions", "Required Monthly Sessions", "521,942"],
+        ["当前 AOV", "Current AOV", "US$186.02"],
+        ["当前 CVR", "Current CVR", "1.03%"],
+      ])}</div>
+      <div data-current-capability>${goalBreakdownPanel("当前能力评估", "Current Capability", [
+        ["当前月度 GMV Run Rate", "Monthly GMV Run Rate", "US$256,140.00"],
+        ["当前月度订单 Run Rate", "Monthly Orders Run Rate", "1,377"],
+        ["当前月度 Sessions Run Rate", "Monthly Sessions Run Rate", "186,780"],
+        ["当前 CVR", "Current CVR", "1.03%"],
+        ["当前 AOV", "Current AOV", "US$186.02"],
+        ["预测月 GMV", "Forecast Month GMV", "US$357,872.00"],
+      ])}</div>
     </div>
 
     <section class="section">
@@ -875,10 +967,11 @@ function integrationPage() {
       source: "ga4",
       icon: "G",
       title: "Google Analytics 4",
-      subtitle: "GA4 · Google OAuth",
+      subtitle: "GA4 · Service Account",
       status: "未连接",
       fields: [
         ["property_id", "Property ID · GA4 属性 ID", ""],
+        ["service_account_json", "Service Account JSON · 粘贴完整 JSON（仅服务端保存）", "", "textarea"],
         ["sync_interval", "同步频率", "30"],
       ],
     },
@@ -910,9 +1003,9 @@ function integrationPage() {
   ];
   return `
     <div class="grid cols-3" style="max-width:900px;margin:0 auto 24px">
-      <div class="card pad"><div class="muted">集成总数</div><div class="metric-value">4</div></div>
-      <div class="card pad"><div class="muted">已连接</div><div class="metric-value" style="color:var(--green)">2</div></div>
-      <div class="card pad"><div class="muted">连接异常</div><div class="metric-value" style="color:var(--red)">0</div></div>
+      <div class="card pad"><div class="muted">集成总数</div><div class="metric-value" data-integration-summary="total">4</div></div>
+      <div class="card pad"><div class="muted">已连接</div><div class="metric-value" style="color:var(--green)" data-integration-summary="connected">0</div></div>
+      <div class="card pad"><div class="muted">连接异常</div><div class="metric-value" style="color:var(--red)" data-integration-summary="issues">0</div></div>
     </div>
     <div class="card pad" style="max-width:900px;margin:0 auto 24px">
       <div class="field">
@@ -930,11 +1023,40 @@ function integrationPage() {
                   <span class="source-icon" style="width:36px;height:36px;border-radius:7px;background:${icon === "G" ? "#f59e0b" : icon === "A" ? "#4f80ff" : icon === "M" ? "#3478f6" : "var(--green)"};color:#fff;font-weight:850">${icon}</span>
                   <div><div class="section-title" style="font-size:18px">${title}</div><div class="muted">${subtitle}</div></div>
                 </div>
-                <span class="status ${status === "未连接" ? "gray" : ""}">${status}</span>
+                <span class="status ${status === "未连接" ? "gray" : ""}" data-integration-status>${status}</span>
               </div>
               <div class="placeholder-line"></div>
+              <div class="grid cols-4" style="margin-bottom:14px">
+                <div class="card pad">
+                  <div class="muted">Connection Status · 连接状态</div>
+                  <div class="metric-label" data-integration-field="status_text">未连接</div>
+                </div>
+                <div class="card pad">
+                  <div class="muted">Last Connected · 最近连接</div>
+                  <div class="metric-label" data-integration-field="last_connected_at">—</div>
+                </div>
+                <div class="card pad">
+                  <div class="muted">Last Tested · 最近测试</div>
+                  <div class="metric-label" data-integration-field="last_tested_at">—</div>
+                </div>
+                <div class="card pad">
+                  <div class="muted">Last Sync Time · 最近同步</div>
+                  <div class="metric-label" data-integration-field="last_synced_at">—</div>
+                </div>
+              </div>
               <div class="form-grid">
-                ${fields.map(([key, label, value]) => `<div class="field"><label>${label}</label><input data-config-key="${key}" value="${value}" ${/secret|token/i.test(key) ? 'type="password"' : ""} /></div>`).join("")}
+                ${fields
+                  .map(([key, label, value, kind]) => `
+                    <div class="field">
+                      <label>${label}</label>
+                      ${
+                        kind === "textarea"
+                          ? `<textarea data-config-key="${key}" rows="6" placeholder="粘贴 Google Service Account JSON">${value}</textarea>`
+                          : `<input data-config-key="${key}" value="${value}" ${/secret|token/i.test(key) ? 'type="password"' : ""} />`
+                      }
+                    </div>
+                  `)
+                  .join("")}
               </div>
               <div class="button-row">
                 <button class="ghost-btn" data-action="disconnect-source">断开连接</button>
@@ -1035,6 +1157,7 @@ function render() {
   if (page === "integration") loadIntegrationConfigs();
   if (page === "coupons") loadCoupons();
   hydrateDashboardData();
+  initializeSparklineTooltips();
 }
 
 app.addEventListener("click", (event) => {
@@ -1046,7 +1169,17 @@ app.addEventListener("click", (event) => {
 
   const rangeButton = event.target.closest("[data-range]");
   if (rangeButton) {
+    if (rangeButton.dataset.range === "自定义") {
+      const currentRange = resolveDateRange();
+      state.customRange.start = state.customRange.start || currentRange.start;
+      state.customRange.end = state.customRange.end || currentRange.end;
+      state.datePickerOpen = true;
+      render();
+      return;
+    }
     state.range = rangeButton.dataset.range;
+    state.datePickerOpen = false;
+    invalidateDashboardData();
     render();
     showToast(`时间范围已切换为：${state.range}`);
     return;
@@ -1072,6 +1205,16 @@ app.addEventListener("input", (event) => {
     return;
   }
 
+  if (event.target.matches("[data-custom-start]")) {
+    state.customRange.start = event.target.value;
+    return;
+  }
+
+  if (event.target.matches("[data-custom-end]")) {
+    state.customRange.end = event.target.value;
+    return;
+  }
+
   if (!event.target.matches("[data-coupon-search]")) return;
   state.couponQuery = event.target.value;
   updateCouponResults();
@@ -1092,7 +1235,41 @@ function updateCouponResults() {
   if (count) count.textContent = rows.length;
 }
 
+function applyCustomRange() {
+  if (!state.customRange.start || !state.customRange.end) {
+    showToast("请选择开始日期和结束日期。");
+    return;
+  }
+
+  if (state.customRange.start > state.customRange.end) {
+    showToast("开始日期不能晚于结束日期。");
+    return;
+  }
+
+  state.range = "自定义";
+  state.datePickerOpen = false;
+  invalidateDashboardData();
+  render();
+  showToast(`时间范围已切换为：${state.customRange.start} → ${state.customRange.end}`);
+}
+
+function invalidateDashboardData() {
+  state.dashboardData = null;
+  state.dashboardDataKey = "";
+}
+
 async function handleAction(action, button) {
+  if (action === "close-date-picker") {
+    state.datePickerOpen = false;
+    render();
+    return;
+  }
+
+  if (action === "apply-date-range") {
+    applyCustomRange();
+    return;
+  }
+
   if (action === "save-source") {
     await saveIntegration(button);
     return;
@@ -1100,15 +1277,18 @@ async function handleAction(action, button) {
 
   if (action === "test-source") {
     await saveIntegration(button);
-    if (button?.dataset.source === "shopify") await runShopifySync();
+    if (button?.dataset.source === "shopify") await runShopifySync("test");
+    if (button?.dataset.source === "ga4") await runGa4Sync("test");
     return;
   }
 
   if (action === "manual-sync") {
     if (button?.dataset.source === "shopify") {
       await runShopifySync();
+    } else if (button?.dataset.source === "ga4") {
+      await runGa4Sync();
     } else {
-      showToast("这个数据源的同步接口还没接入，当前只接通 Shopify。");
+      showToast("这个数据源的同步接口还没接入，当前先接通 Shopify 和 GA4。");
     }
     return;
   }
@@ -1135,8 +1315,8 @@ async function handleAction(action, button) {
     "delete-coupon": "已模拟删除券码；真实环境会二次确认。",
     "disconnect-source": "已模拟断开连接。",
     "save-source": "配置已模拟保存。",
-    "test-source": "连接测试已模拟通过。",
-    "manual-sync": "已模拟触发手动同步任务。",
+    "test-source": "连接测试已触发。",
+    "manual-sync": "已触发手动同步任务。",
   };
   showToast(messages[action] || "操作已触发。");
 }
@@ -1194,19 +1374,47 @@ async function disconnectSource(button) {
   }
 }
 
-async function runShopifySync() {
+async function runShopifySync(mode = "sync") {
   if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
 
-  showToast("正在触发 Shopify 同步...");
+  showToast(mode === "test" ? "正在测试 Shopify 连接..." : "正在触发 Shopify 同步...");
   try {
-    const response = await fetch(`/api/sync/shopify-orders?secret=${encodeURIComponent(state.integrationSecret)}`);
+    const suffix = mode === "test" ? "&mode=test" : "";
+    const response = await fetch(`/api/sync/shopify-orders?secret=${encodeURIComponent(state.integrationSecret)}${suffix}`);
     const data = await response.json();
     if (!response.ok || !data.ok) throw new Error(data.error || "同步失败");
+    await loadIntegrationConfigs();
+    if (mode === "test") {
+      showToast("Shopify 连接测试通过。");
+      return;
+    }
     state.dashboardData = null;
     await hydrateDashboardData();
     showToast(`Shopify 同步完成：订单 ${data.imported_orders}，明细 ${data.imported_line_items}`);
   } catch (error) {
     showToast(`同步失败：${error.message}`);
+  }
+}
+
+async function runGa4Sync(mode = "sync") {
+  if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
+
+  showToast(mode === "test" ? "正在测试 GA4 连接..." : "正在同步 GA4 数据...");
+  try {
+    const suffix = mode === "test" ? "&mode=test" : "";
+    const response = await fetch(`/api/sync/ga4?secret=${encodeURIComponent(state.integrationSecret)}${suffix}`);
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "GA4 同步失败");
+    await loadIntegrationConfigs();
+    if (mode === "test") {
+      showToast(`GA4 连接测试通过：Property ${data.property_id}`);
+      return;
+    }
+    state.dashboardData = null;
+    await hydrateDashboardData();
+    showToast(`GA4 同步完成：日指标 ${data.synced_daily_rows}，画像分群 ${data.synced_segment_rows}`);
+  } catch (error) {
+    showToast(`GA4 操作失败：${error.message}`);
   }
 }
 
@@ -1235,22 +1443,65 @@ async function loadIntegrationConfigs() {
     const data = await response.json();
     if (!data.ok) return;
 
-    for (const item of data.integrations || []) {
+    const integrations = data.integrations || [];
+    const connectedCount = integrations.filter((item) => item.status === "connected").length;
+    const issueCount = integrations.filter((item) => item.status && item.status !== "connected" && item.status !== "disconnected").length;
+    updateIntegrationSummary("total", 4);
+    updateIntegrationSummary("connected", connectedCount);
+    updateIntegrationSummary("issues", issueCount);
+
+    for (const item of integrations) {
       const card = document.querySelector(`[data-integration-card="${item.source}"]`);
       if (!card) continue;
       for (const [key, value] of Object.entries(item.config || {})) {
         const input = card.querySelector(`[data-config-key="${key}"]`);
         if (input) input.value = value;
       }
-      const status = card.querySelector(".status");
+      const status = card.querySelector("[data-integration-status]");
       if (status) {
-        status.textContent = item.status === "connected" ? "已保存" : item.status || "未连接";
+        status.textContent = integrationStatusLabel(item.status);
         status.classList.toggle("gray", item.status !== "connected");
       }
+      updateIntegrationField(card, "status_text", integrationStatusDetail(item.status));
+      updateIntegrationField(card, "last_connected_at", formatMaybeDate(item.last_connected_at));
+      updateIntegrationField(card, "last_tested_at", formatMaybeDate(item.last_tested_at));
+      updateIntegrationField(card, "last_synced_at", formatMaybeDate(item.last_synced_at));
     }
   } catch {
     // Keep form defaults when API is unavailable.
   }
+}
+
+function updateIntegrationSummary(key, value) {
+  const node = document.querySelector(`[data-integration-summary="${key}"]`);
+  if (node) node.textContent = String(value);
+}
+
+function updateIntegrationField(card, key, value) {
+  const node = card.querySelector(`[data-integration-field="${key}"]`);
+  if (node) node.textContent = value;
+}
+
+function integrationStatusLabel(status) {
+  return {
+    connected: "已连接",
+    disconnected: "未连接",
+    error: "异常",
+    running: "同步中",
+  }[status] || "未连接";
+}
+
+function integrationStatusDetail(status) {
+  return {
+    connected: "已连接",
+    disconnected: "未连接",
+    error: "连接异常",
+    running: "同步中",
+  }[status] || "未连接";
+}
+
+function formatMaybeDate(value) {
+  return value ? formatDateTime(value) : "—";
 }
 
 async function loadCoupons() {
@@ -1289,25 +1540,68 @@ function showToast(message) {
 }
 
 async function hydrateDashboardData() {
-  if (state.dashboardData) {
+  const rangeQuery = buildDashboardRangeQuery();
+  const requestKey = rangeQuery || "default";
+
+  if (state.dashboardData && state.dashboardDataKey === requestKey) {
     applyDashboardData(state.dashboardData);
     return;
   }
 
   try {
-    const response = await fetch("/api/dashboard/shopify");
+    const response = await fetch(`/api/dashboard/shopify${rangeQuery ? `?${rangeQuery}` : ""}`);
     if (!response.ok) return;
     const data = await response.json();
     if (!data.ok) return;
     state.dashboardData = data;
+    state.dashboardDataKey = requestKey;
     applyDashboardData(data);
   } catch {
     // Keep mock data visible when the local static preview has no API runtime.
   }
 }
 
+function buildDashboardRangeQuery() {
+  const range = resolveDateRange();
+  const params = new URLSearchParams();
+  if (range.start) params.set("start", range.start);
+  if (range.end) params.set("end", range.end);
+  return params.toString();
+}
+
+function resolveDateRange() {
+  const today = new Date();
+  const end = formatDateInputValue(today);
+
+  if (state.range === "今天") {
+    return { start: end, end };
+  }
+
+  if (state.range === "昨天") {
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const day = formatDateInputValue(yesterday);
+    return { start: day, end: day };
+  }
+
+  if (state.range === "近 7 天") {
+    const start = new Date(today);
+    start.setDate(start.getDate() - 6);
+    return { start: formatDateInputValue(start), end };
+  }
+
+  if (state.range === "自定义" && state.customRange.start && state.customRange.end) {
+    return { start: state.customRange.start, end: state.customRange.end };
+  }
+
+  const start = new Date(today);
+  start.setDate(start.getDate() - 29);
+  return { start: formatDateInputValue(start), end };
+}
+
 function applyDashboardData(data) {
   const summary = data.summary || {};
+  const activeGoal = data.active_goal || null;
   const adTotals = buildAdTotals(data.ad_performance || []);
   const channelMix = buildChannelMix(data.channel_sales || [], data.ad_performance || []);
   const funnelSteps = buildFunnelSteps(data.ga4_funnel || {}, adTotals, summary);
@@ -1328,7 +1622,9 @@ function applyDashboardData(data) {
   });
 
   const progress = document.querySelector(".progress > span");
-  if (progress && summary.gmv !== undefined) {
+  if (progress && activeGoal?.achievement_rate !== undefined) {
+    progress.style.width = `${Math.max(0, Math.min(100, activeGoal.achievement_rate))}%`;
+  } else if (progress && summary.gmv !== undefined) {
     progress.style.width = `${Math.max(0, Math.min(100, (summary.gmv / 1000000) * 100))}%`;
   }
 
@@ -1406,6 +1702,80 @@ function applyDashboardData(data) {
         `${formatNumber(row.order_share)}%`,
       ]),
     );
+  }
+
+  if (activeGoal) {
+    const goalName = document.querySelector("[data-goal-name]");
+    if (goalName) goalName.textContent = activeGoal.name;
+
+    const goalPeriod = document.querySelector("[data-goal-period]");
+    if (goalPeriod) {
+      goalPeriod.textContent = `目标周期 ${activeGoal.start_date} → ${activeGoal.end_date} · 目标 GMV ${formatCurrency(activeGoal.target_gmv)}`;
+    }
+
+    const goalStatus = document.querySelector("[data-goal-status]");
+    if (goalStatus) {
+      const statusMap = {
+        "On Track": pill("达标中 On Track"),
+        Watch: pill("需要关注 Watch", "orange"),
+        "Off Track": pill("严重偏离 Off Track", "red"),
+      };
+      goalStatus.innerHTML = statusMap[activeGoal.status] || pill(activeGoal.status || "进行中");
+    }
+
+    const goalProgressLabel = document.querySelector("[data-goal-progress-label]");
+    if (goalProgressLabel) {
+      goalProgressLabel.innerHTML = `当前目标达成率 <span>${formatNumber(activeGoal.achievement_rate)}%</span> / 目标`;
+    }
+
+    const goalProgressValue = document.querySelector("[data-goal-progress-value]");
+    if (goalProgressValue) {
+      goalProgressValue.innerHTML = `${formatCurrency(activeGoal.current_goal_gmv)} / ${formatCurrency(activeGoal.target_gmv)}`;
+    }
+
+    const goalSummary = document.querySelector("[data-goal-summary]");
+    if (goalSummary) {
+      goalSummary.innerHTML = [
+        ["目标月份", `${formatMonthLabel(activeGoal.start_date)}`],
+        ["目标 GMV", formatCurrency(activeGoal.target_gmv)],
+        ["当前月度能力", formatCurrency(activeGoal.monthly_gmv_run_rate), "var(--green)"],
+        ["目标差距", formatCurrency(activeGoal.forecast_gap ?? activeGoal.gap), "var(--red)"],
+        [`${activeRangeLabel()} GMV`, formatCurrency(activeGoal.current_range_gmv)],
+      ]
+        .map(
+          ([label, value, color]) => `
+            <div class="card pad">
+              <div class="metric-label">${label}</div>
+              <div class="metric-value" style="${color ? `color:${color}` : ""}">${value}</div>
+            </div>
+          `,
+        )
+        .join("");
+    }
+
+    const goalBreakdown = document.querySelector("[data-goal-breakdown]");
+    if (goalBreakdown) {
+      goalBreakdown.innerHTML = goalBreakdownPanel("目标拆解", "Target Breakdown", [
+        ["达标所需日均 GMV", "Required Daily GMV", formatCurrency(activeGoal.required_daily_gmv)],
+        ["达标所需日均订单数", "Required Daily Orders", formatNumber(activeGoal.required_daily_orders)],
+        ["达标所需月订单数", "Required Monthly Orders", formatInteger(activeGoal.required_monthly_orders)],
+        ["达标所需 Sessions", "Required Monthly Sessions", formatInteger(activeGoal.required_monthly_sessions)],
+        ["当前 AOV", "Current AOV", formatCurrency(activeGoal.current_aov)],
+        ["当前 CVR", "Current CVR", `${formatNumber(activeGoal.current_cvr)}%`],
+      ]);
+    }
+
+    const currentCapability = document.querySelector("[data-current-capability]");
+    if (currentCapability) {
+      currentCapability.innerHTML = goalBreakdownPanel("当前能力评估", "Current Capability", [
+        ["当前月度 GMV Run Rate", "Monthly GMV Run Rate", formatCurrency(activeGoal.monthly_gmv_run_rate), "var(--green)"],
+        ["当前月度订单 Run Rate", "Monthly Orders Run Rate", formatInteger(activeGoal.monthly_orders_run_rate)],
+        ["当前月度 Sessions Run Rate", "Monthly Sessions Run Rate", formatInteger(activeGoal.monthly_sessions_run_rate)],
+        ["当前 CVR", "Current CVR", `${formatNumber(activeGoal.current_cvr)}%`],
+        ["当前 AOV", "Current AOV", formatCurrency(activeGoal.current_aov)],
+        ["预测月 GMV", "Forecast Month GMV", formatCurrency(activeGoal.forecast_goal_gmv), "var(--green)"],
+      ]);
+    }
   }
 
   const marketingOverview = document.querySelector("[data-marketing-overview]");
@@ -1533,6 +1903,111 @@ function applyDashboardData(data) {
       `${pill("GA4")} ${pill("Shopify")}`,
     );
   }
+
+  applyRealSparklineSeries(data);
+}
+
+function applyRealSparklineSeries(data) {
+  const seriesMap = buildSeriesMap(data);
+  document.querySelectorAll(".sparkline-wrap[data-series-key]").forEach((node) => {
+    const key = node.dataset.seriesKey;
+    const series = seriesMap[key];
+    if (!series?.length) return;
+    setSparklineSeries(node, series);
+  });
+  initializeSparklineTooltips();
+}
+
+function buildSeriesMap(data) {
+  const sales = data.daily_sales || [];
+  const ga4 = data.ga4_daily || [];
+  const ads = data.ad_daily || [];
+
+  return {
+    gmv: sales.map((row) => ({ label: row.day, value: row.gmv })),
+    orders: sales.map((row) => ({ label: row.day, value: row.orders })),
+    aov: sales.map((row) => ({ label: row.day, value: row.aov })),
+    refunds: sales.map((row) => ({ label: row.day, value: row.refunds })),
+    sessions: ga4.map((row) => ({ label: row.day, value: row.sessions })),
+    users: ga4.map((row) => ({ label: row.day, value: row.users })),
+    add_to_cart_rate: ga4.map((row) => ({ label: row.day, value: row.add_to_cart_rate })),
+    checkout_rate: ga4.map((row) => ({ label: row.day, value: row.checkout_rate })),
+    cvr: ga4.map((row) => ({ label: row.day, value: row.cvr })),
+    payment_completion_rate: ga4.map((row) => ({ label: row.day, value: row.payment_completion_rate })),
+    spend: ads.map((row) => ({ label: row.day, value: row.spend })),
+    cpc: ads.map((row) => ({ label: row.day, value: row.cpc })),
+    cpm: ads.map((row) => ({ label: row.day, value: row.cpm })),
+    roas: ads.map((row) => ({ label: row.day, value: row.roas })),
+    cpa: ads.map((row) => ({ label: row.day, value: row.cpa })),
+  };
+}
+
+function setSparklineSeries(node, points) {
+  const series = normalizeSparklineSeries(points);
+  node.dataset.series = JSON.stringify(series);
+  const svg = node.querySelector(".sparkline");
+  if (!svg) return;
+  const values = series.map((point) => Number(point.value || 0));
+  const max = Math.max(...values, 0);
+  const min = Math.min(...values, 0);
+  const coords = values.map((p, i) => {
+    const x = (i / Math.max(values.length - 1, 1)) * 100;
+    const y = 42 - ((p - min) / (max - min || 1)) * 34;
+    return [x, y];
+  });
+  const line = smoothPath(coords);
+  const fill = `${line} L100,46 L0,46 Z`;
+  const fillPath = svg.querySelector(".fill");
+  const linePath = svg.querySelector(".line");
+  if (fillPath) fillPath.setAttribute("d", fill);
+  if (linePath) linePath.setAttribute("d", line);
+}
+
+function normalizeSparklineSeries(points) {
+  return points.map((point, index) =>
+    typeof point === "number"
+      ? { label: `P${index + 1}`, value: point }
+      : { label: point.label || `P${index + 1}`, value: Number(point.value || 0) },
+  );
+}
+
+function initializeSparklineTooltips() {
+  document.querySelectorAll(".sparkline-wrap").forEach((node) => {
+    if (node.dataset.tooltipBound === "1") return;
+    node.dataset.tooltipBound = "1";
+    node.addEventListener("mousemove", handleSparklineMove);
+    node.addEventListener("mouseleave", handleSparklineLeave);
+  });
+}
+
+function handleSparklineMove(event) {
+  const wrapper = event.currentTarget;
+  const tooltip = wrapper.querySelector(".sparkline-tooltip");
+  const series = JSON.parse(wrapper.dataset.series || "[]");
+  if (!tooltip || !series.length) return;
+
+  const rect = wrapper.getBoundingClientRect();
+  const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
+  const index = Math.min(series.length - 1, Math.round(ratio * Math.max(series.length - 1, 1)));
+  const point = series[index];
+  tooltip.innerHTML = `<strong>${escapeHtml(point.label)}</strong><span>${formatTooltipValue(point.value, wrapper.dataset.seriesKey)}</span>`;
+  tooltip.style.opacity = "1";
+  tooltip.style.left = `${Math.min(Math.max(ratio * rect.width, 58), rect.width - 58)}px`;
+  tooltip.style.top = "4px";
+}
+
+function handleSparklineLeave(event) {
+  const tooltip = event.currentTarget.querySelector(".sparkline-tooltip");
+  if (tooltip) tooltip.style.opacity = "0";
+}
+
+function formatTooltipValue(value, key) {
+  if (["gmv", "aov", "refunds", "spend", "cpc", "cpm", "cpa"].includes(key)) return formatCurrency(value);
+  if (key === "roas") return `${formatNumber(value)}x`;
+  if (["cvr", "add_to_cart_rate", "checkout_rate", "payment_completion_rate"].includes(key)) {
+    return `${formatNumber(value)}%`;
+  }
+  return formatNumber(value);
 }
 
 function buildAdTotals(rows) {
@@ -1657,6 +2132,19 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function formatDateInputValue(value) {
+  const date = new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatMonthLabel(value) {
+  const date = new Date(`${value}T00:00:00`);
+  return `${date.getFullYear()}年${date.getMonth() + 1}月`;
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -1664,6 +2152,10 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function escapeAttr(value) {
+  return String(value ?? "").replaceAll("&", "&amp;").replaceAll('"', "&quot;");
 }
 
 render();

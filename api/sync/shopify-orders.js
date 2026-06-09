@@ -124,7 +124,8 @@ module.exports = async function handler(req, res) {
     assertAuthorized(req);
     assertEnv();
 
-    const syncResult = await syncShopifyOrders();
+    const mode = req.query?.mode === "test" ? "test" : "sync";
+    const syncResult = await syncShopifyOrders(mode);
     return res.status(200).json(syncResult);
   } catch (error) {
     return res.status(error.statusCode || 500).json({
@@ -158,7 +159,7 @@ function assertEnv() {
   }
 }
 
-async function syncShopifyOrders() {
+async function syncShopifyOrders(mode = "sync") {
   const config = await getIntegrationConfig("shopify");
   const shopDomain = normalizeShopDomain(config.shop_domain || process.env.SHOPIFY_SHOP_DOMAIN);
   const first = Number(process.env.SHOPIFY_SYNC_PAGE_SIZE || 50);
@@ -167,6 +168,22 @@ async function syncShopifyOrders() {
 
   const shop = await ensureShop(shopDomain, accessToken);
   await assertShopifyScopes(shopDomain, accessToken, ["read_orders"]);
+
+  if (mode === "test") {
+    const now = new Date().toISOString();
+    await touchIntegration("shopify", {
+      status: "connected",
+      last_connected_at: now,
+      last_tested_at: now,
+    });
+    return {
+      ok: true,
+      shop_domain: shopDomain,
+      shop_id: shop.id,
+      mode: "test",
+      tested_at: now,
+    };
+  }
 
   const syncState = await getSyncState(shop.id);
   const updatedAfter = syncState?.last_synced_at || process.env.SHOPIFY_SYNC_START_DATE || daysAgoIso(30);
@@ -220,7 +237,7 @@ async function syncShopifyOrders() {
     if (!ordersConnection.pageInfo.hasNextPage) break;
   }
 
-  return {
+  const result = {
     ok: true,
     shop_domain: shopDomain,
     shop_id: shop.id,
@@ -232,6 +249,15 @@ async function syncShopifyOrders() {
     has_more: Boolean(lastCursor && pages >= maxPages),
     next_cursor: lastCursor,
   };
+
+  await touchIntegration("shopify", {
+    status: "connected",
+    last_connected_at: new Date().toISOString(),
+    last_tested_at: new Date().toISOString(),
+    last_synced_at: latestUpdatedAt,
+  });
+
+  return result;
 }
 
 async function getIntegrationConfig(source) {
@@ -239,6 +265,26 @@ async function getIntegrationConfig(source) {
     `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}&select=config&limit=1`,
   );
   return rows[0]?.config || {};
+}
+
+async function touchIntegration(source, patch) {
+  const rows = await supabaseFetch(
+    `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}&select=id,config,status,last_connected_at,last_tested_at,last_synced_at&limit=1`,
+  );
+  const current = rows[0];
+  if (!current?.id) return;
+
+  await supabaseFetch(`/rest/v1/data_integrations?id=eq.${current.id}`, {
+    method: "PATCH",
+    headers: { prefer: "return=minimal" },
+    body: JSON.stringify({
+      status: patch.status || current.status || "connected",
+      config: current.config || {},
+      last_connected_at: patch.last_connected_at ?? current.last_connected_at ?? null,
+      last_tested_at: patch.last_tested_at ?? current.last_tested_at ?? null,
+      last_synced_at: patch.last_synced_at ?? current.last_synced_at ?? null,
+    }),
+  });
 }
 
 async function getShopifyAccessToken(shopDomain, config = {}) {

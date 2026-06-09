@@ -102,7 +102,9 @@ function mergeConfig(current, incoming) {
 function redactConfig(config) {
   const redacted = { ...config };
   for (const key of Object.keys(redacted)) {
-    if (/secret|token|key/i.test(key)) redacted[key] = redacted[key] ? "已保存，留空则不修改" : "";
+    if (/secret|token|key/i.test(key) || key === "service_account_json") {
+      redacted[key] = redacted[key] ? "已保存，留空则不修改" : "";
+    }
   }
   return redacted;
 }
