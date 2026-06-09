@@ -288,14 +288,50 @@ Hobby 计划 Cron 只能每天运行一次；上面配置表示每天 UTC 01:00 
 
 ## 6. 前台接真实数据
 
-当前前台在 `app.js` 中使用本地 mock 数据。后续改成：
+项目已经新增真实数据接口：
 
-```js
-const res = await fetch('/api/dashboard/summary?range=30d')
-const data = await res.json()
+```text
+/api/dashboard/shopify
 ```
 
-然后把页面中的 mock 数组替换为接口返回的数据。
+这个接口会读取 Supabase 里的这些视图/表：
+
+```text
+dashboard_summary_30d
+dashboard_daily_sales
+dashboard_top_products
+dashboard_country_sales
+sync_state
+```
+
+前台 `app.js` 会在页面加载后自动请求：
+
+```js
+fetch('/api/dashboard/shopify')
+```
+
+如果接口成功返回，页面会用真实 Shopify 数据覆盖关键 mock 指标；如果接口失败或本地静态预览没有 API runtime，则继续显示 mock 数据作为兜底。
+
+部署到 Vercel 后，确认真实数据接口：
+
+```text
+https://你的域名.vercel.app/api/dashboard/shopify
+```
+
+如果返回：
+
+```json
+{
+  "ok": true,
+  "summary": {}
+}
+```
+
+说明前台已经可以读取 Supabase。若 `summary` 全是 0，说明 Shopify 订单还没有同步进 Supabase，先运行：
+
+```text
+https://你的域名.vercel.app/api/sync/shopify-orders?secret=你的CRON_SECRET
+```
 
 ## 7. 本地预览
 

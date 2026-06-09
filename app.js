@@ -106,6 +106,7 @@ const state = {
   sourceTab: "总览",
   couponQuery: "",
   couponFilter: "all",
+  dashboardData: null,
 };
 
 function currentPage() {
@@ -233,12 +234,13 @@ function pill(label, color = "") {
 
 function metricCard(label, value, delta = "+0.00%", source = "Shopify", series = metricSeries) {
   const down = String(delta).includes("-");
+  const key = metricKey(label);
   return `
     <div class="card metric-card">
       <div class="metric-head">
         <div>
           <div class="metric-label">${label}</div>
-          <div class="metric-value">${value}</div>
+          <div class="metric-value" ${key ? `data-metric="${key}"` : ""}>${value}</div>
         </div>
         <div>
           ${pill(source)}
@@ -249,6 +251,17 @@ function metricCard(label, value, delta = "+0.00%", source = "Shopify", series =
       <div class="small-label">较上期</div>
     </div>
   `;
+}
+
+function metricKey(label) {
+  return {
+    总销售额: "gmv",
+    订单数: "orders",
+    客单价: "aov",
+    退款额: "refunds",
+    新客户: "customers",
+    店铺总客户数: "customers",
+  }[label];
 }
 
 function mockMetric(label, value, source = "Google Ads", series = [24, 24, 24, 24, 24, 24]) {
@@ -407,7 +420,7 @@ function northstarPage() {
         ${pill("严重偏离 Off Track", "red")}
       </div>
       <div style="margin-top:24px">
-        <div class="metric-head muted"><span>当前月度能力 25.61% / 目标</span><strong>US$256,140.00 / US$1,000,000.00</strong></div>
+        <div class="metric-head muted"><span>当前月度能力 <span data-metric="achievement_rate">25.61%</span> / 目标</span><strong><span data-metric="gmv">US$256,140.00</span> / US$1,000,000.00</strong></div>
         <div class="progress" style="margin-top:8px"><span style="width:25.6%"></span></div>
       </div>
     </div>
@@ -416,7 +429,7 @@ function northstarPage() {
       ${[
         ["目标月份", "2026年9月"],
         ["目标 GMV", "US$1,000,000.00"],
-        ["当前月度能力", "US$256,140.00"],
+        ["当前月度能力", '<span data-metric="gmv">US$256,140.00</span>'],
         ["目标差距", "US$743,860.00"],
         ["近 30 天 GMV", "US$256,153.98"],
       ]
@@ -647,7 +660,7 @@ function operationsPage() {
       ${barChartCard("访客渠道来源", [["Instagram", 420000], ["邮件营销", 415000], ["Google", 360000], ["TikTok", 210000], ["联盟推广", 190000], ["Facebook", 110000], ["直播访问", 90000]])}
       ${barChartCard("渠道转化率", [["Facebook", 3.8], ["直接访问", 3.4], ["联盟推广", 2.1], ["TikTok", 1.8], ["Google", 1.1], ["邮件营销", 0.8], ["Instagram", 0.6]], "#8e98aa")}
     </div>
-    ${section("商品销量排行", "", "", tableCard("", ["#", "商品", "销量", "销售额"], productRows.map((r, i) => [i + 1, ...r])))}
+    ${section("商品销量排行", "", "", `<div data-top-products>${tableCard("", ["#", "商品", "销量", "销售额"], productRows.map((r, i) => [i + 1, ...r]))}</div>`)}
     ${section("美国各州销售分布", "仅统计美国市场订单", "", `<div class="card pad map-panel"><div class="us-map"></div><div>${miniRanks()}</div></div>`)}
   `;
 }
@@ -963,6 +976,7 @@ function render() {
     coupons: couponsPage,
   };
   app.innerHTML = layout(pages[page]());
+  hydrateDashboardData();
 }
 
 app.addEventListener("click", (event) => {
@@ -1045,6 +1059,106 @@ function showToast(message) {
   toast.classList.add("show");
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => toast.classList.remove("show"), 2200);
+}
+
+async function hydrateDashboardData() {
+  if (state.dashboardData) {
+    applyDashboardData(state.dashboardData);
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/dashboard/shopify");
+    if (!response.ok) return;
+    const data = await response.json();
+    if (!data.ok) return;
+    state.dashboardData = data;
+    applyDashboardData(data);
+  } catch {
+    // Keep mock data visible when the local static preview has no API runtime.
+  }
+}
+
+function applyDashboardData(data) {
+  const summary = data.summary || {};
+  const values = {
+    gmv: formatCurrency(summary.gmv),
+    net_sales: formatCurrency(summary.net_sales),
+    orders: formatInteger(summary.orders),
+    customers: formatInteger(summary.customers),
+    aov: formatCurrency(summary.aov),
+    refunds: formatCurrency(summary.refunds),
+    refund_rate: `${formatNumber(summary.refund_rate)}%`,
+    achievement_rate: `${formatNumber((summary.gmv / 1000000) * 100)}%`,
+  };
+
+  document.querySelectorAll("[data-metric]").forEach((node) => {
+    const value = values[node.dataset.metric];
+    if (value !== undefined) node.textContent = value;
+  });
+
+  const progress = document.querySelector(".progress > span");
+  if (progress && summary.gmv !== undefined) {
+    progress.style.width = `${Math.max(0, Math.min(100, (summary.gmv / 1000000) * 100))}%`;
+  }
+
+  const syncBar = document.querySelector(".sync-bar");
+  if (syncBar && data.sync?.last_synced_at) {
+    syncBar.innerHTML = `Last Sync Time: <strong>${formatDateTime(data.sync.last_synced_at)}</strong>`;
+  }
+
+  const topProducts = document.querySelector("[data-top-products]");
+  if (topProducts && data.top_products?.length) {
+    topProducts.innerHTML = tableCard(
+      "",
+      ["#", "商品", "销量", "销售额"],
+      data.top_products.map((row, index) => [
+        index + 1,
+        `${escapeHtml(row.title)}${row.sku ? `<div class="small-label">${escapeHtml(row.sku)}</div>` : ""}`,
+        formatInteger(row.units_sold),
+        formatCurrency(row.revenue),
+      ]),
+    );
+  }
+}
+
+function formatCurrency(value) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0));
+}
+
+function formatInteger(value) {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Number(value || 0));
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0));
+}
+
+function formatDateTime(value) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 render();
