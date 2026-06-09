@@ -173,6 +173,8 @@ async function syncShopifyOrders() {
   const accessToken = await getShopifyAccessToken(shopDomain);
 
   const shop = await ensureShop(shopDomain, accessToken);
+  await assertShopifyScopes(shopDomain, accessToken, ["read_orders"]);
+
   const syncState = await getSyncState(shop.id);
   const updatedAfter = syncState?.last_synced_at || process.env.SHOPIFY_SYNC_START_DATE || daysAgoIso(30);
 
@@ -297,6 +299,46 @@ async function ensureShop(shopDomain, accessToken) {
 
   if (!rows[0]) throw new Error("Failed to create or read shop row");
   return rows[0];
+}
+
+async function assertShopifyScopes(shopDomain, accessToken, requiredScopes) {
+  const query = `
+    query CurrentAppScopes {
+      currentAppInstallation {
+        accessScopes {
+          handle
+        }
+      }
+    }
+  `;
+
+  let scopes = [];
+  try {
+    const data = await shopifyGraphql(shopDomain, accessToken, query, {});
+    scopes = data.currentAppInstallation?.accessScopes?.map((scope) => scope.handle) || [];
+  } catch (error) {
+    return;
+  }
+
+  const missing = requiredScopes.filter((scope) => !scopes.includes(scope));
+  if (missing.length) {
+    const error = new Error("Shopify app is missing required Admin API scopes");
+    error.statusCode = 403;
+    error.details = {
+      missing_scopes: missing,
+      current_scopes: scopes,
+      fix: [
+        "Open Shopify Dev Dashboard",
+        "Open this app",
+        "Go to Configuration / Admin API integration",
+        "Add the missing scopes",
+        "Save changes",
+        "Reinstall or update the app on the store",
+        "Redeploy Vercel, then run sync again",
+      ],
+    };
+    throw error;
+  }
 }
 
 async function getSyncState(shopId) {
@@ -436,6 +478,18 @@ async function shopifyGraphql(shopDomain, accessToken, query, variables) {
     const error = new Error("Shopify GraphQL request failed");
     error.statusCode = response.status || 500;
     error.details = body.errors || body;
+    if (Array.isArray(body.errors) && body.errors.some((item) => item?.extensions?.code === "ACCESS_DENIED")) {
+      error.statusCode = 403;
+      error.details = {
+        shopify_errors: body.errors,
+        likely_fix: [
+          "Add read_orders in Shopify Dev Dashboard -> Configuration -> Admin API integration",
+          "Also keep read_customers and read_products for customer/product fields",
+          "Save scopes and reinstall/update the app on the store",
+          "Redeploy Vercel so the sync function uses the latest code/env",
+        ],
+      };
+    }
     throw error;
   }
 
