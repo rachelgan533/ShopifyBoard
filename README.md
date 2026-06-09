@@ -260,13 +260,13 @@ select * from dashboard_top_products limit 20;
   "crons": [
     {
       "path": "/api/sync/shopify-orders",
-      "schedule": "0 * * * *"
+      "schedule": "0 1 * * *"
     }
   ]
 }
 ```
 
-Hobby 计划 Cron 最低频率通常较低，生产环境建议使用 Pro。
+Hobby 计划 Cron 只能每天运行一次；上面配置表示每天 UTC 01:00 自动同步一次。需要每小时或更高频同步时，升级 Pro，或先通过同步接口手动触发。
 
 ## 6. 前台接真实数据
 
