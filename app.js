@@ -117,6 +117,8 @@ const state = {
   couponsData: null,
   integrationSecret: "",
   simulator: null,
+  goalsData: null,
+  goalForm: null,
 };
 
 function currentPage() {
@@ -1049,6 +1051,57 @@ function stage(letter, title, subtitle, inner, badge = pill(title === "Acquisiti
 }
 
 function goalsPage() {
+  const form = state.goalForm || defaultGoalForm(state.goalsData?.active_goal);
+  const activeGoal = state.goalsData?.active_goal || null;
+  const goalRows = state.goalsData?.goals || [];
+  const activeGoalId = activeGoal?.id || "";
+  const dashboardGoal = state.dashboardData?.active_goal || null;
+  const activeRate =
+    dashboardGoal && activeGoalId && dashboardGoal.id === activeGoalId
+      ? `${formatNumber(dashboardGoal.achievement_rate)}%`
+      : "—";
+  const activeActual =
+    dashboardGoal && activeGoalId && dashboardGoal.id === activeGoalId
+      ? formatCurrency(dashboardGoal.actual_gmv)
+      : "—";
+  const listRows = goalRows.length
+    ? goalRows.map((goal) => [
+        `${goal.is_active ? "• " : ""}${escapeHtml(goal.name)}`,
+        goal.start_date,
+        goal.end_date,
+        formatCurrency(goal.target_gmv),
+        goalStatusBadge(goal),
+        goal.id === activeGoalId ? activeRate : "—",
+        `
+          <button class="table-action" data-action="edit-goal" data-goal-id="${goal.id}">编辑</button>
+          ${goal.is_active ? `<button class="table-action" data-action="pause-goal" data-goal-id="${goal.id}">停用</button>` : `<button class="table-action" data-action="activate-goal" data-goal-id="${goal.id}">启用</button>`}
+          <button class="table-action danger" data-action="delete-goal" data-goal-id="${goal.id}">删除</button>
+        `,
+      ])
+    : [["暂无目标", "—", "—", "—", '<span class="status gray">未配置</span>', "—", "—"]];
+  const historyCards = goalRows.length
+    ? goalRows
+        .slice(0, 4)
+        .map(
+          (goal) => `
+            <div class="card pad">
+              <div class="metric-head">
+                <div>
+                  <div class="section-title">${escapeHtml(goal.name)}</div>
+                  <div class="muted">${goal.start_date} → ${goal.end_date}</div>
+                </div>
+                ${goalStatusBadge(goal)}
+              </div>
+              <div class="placeholder-line"></div>
+              <div class="goal-history-grid">
+                <div><div class="muted">目标</div><div class="metric-value">${formatCurrency(goal.target_gmv)}</div></div>
+                <div><div class="muted">状态</div><div class="metric-value goal-history-status">${goal.is_active ? "活动中" : goal.status === "completed" ? "已完成" : goal.status === "inactive" ? "已停用" : "待开始"}</div></div>
+              </div>
+            </div>
+          `,
+        )
+        .join("")
+    : `<div class="card pad"><div class="muted">还没有保存任何目标，先在上面填写一条活动目标就行。</div></div>`;
   return `
     <div class="card settings-card">
       <div class="metric-head">
@@ -1059,24 +1112,59 @@ function goalsPage() {
         <span class="status">Active Goal</span>
       </div>
       <div class="placeholder-line"></div>
-      <div class="metric-head">
+      <div class="grid cols-2 goal-settings-grid">
         <div>
-          <div class="goal-title">2026年9月 GMV百万计划</div>
-          <div class="muted">2026-09-01 → 2026-09-30 · 目标 GMV US$1,000,000.00</div>
-          <p class="muted">9月至季冲刺单月 GMV $1M</p>
+          <div class="goal-title">${escapeHtml(activeGoal?.name || "还没有活动目标")}</div>
+          <div class="muted">${activeGoal ? `${activeGoal.start_date} → ${activeGoal.end_date} · 目标 GMV ${formatCurrency(activeGoal.target_gmv)}` : "保存一条并勾选“设为活动目标”，北极星看板就会读取它。"}</div>
+          <p class="muted">${escapeHtml(activeGoal?.description || "你可以在这里直接填写目标名称、目标周期和 GMV 目标，不用再去 SQL 手改。")}</p>
+          <div class="goal-quick-stats">
+            <div class="card pad"><div class="muted">当前活动目标</div><div class="metric-value">${activeGoal ? formatCurrency(activeGoal.target_gmv) : "—"}</div></div>
+            <div class="card pad"><div class="muted">当前达成额</div><div class="metric-value">${activeActual}</div></div>
+            <div class="card pad"><div class="muted">当前达成率</div><div class="metric-value">${activeRate}</div></div>
+          </div>
         </div>
-        <div class="button-row"><button class="ghost-btn" data-action="edit-goal">✎ 编辑目标</button><button class="ghost-btn" data-action="pause-goal">停用</button></div>
+        <div class="card pad">
+          <div class="field">
+            <label>管理密钥 · 填 Vercel 中的 CRON_SECRET 后才能保存</label>
+            <input data-integration-secret type="password" value="${state.integrationSecret}" placeholder="请输入 CRON_SECRET" />
+          </div>
+          <div class="form-grid goal-form-grid">
+            <input type="hidden" data-goal-key="id" value="${escapeHtml(form.id || "")}" />
+            <div class="field">
+              <label>目标名称</label>
+              <input data-goal-key="name" value="${escapeHtml(form.name || "")}" placeholder="例如：2026年9月 GMV百万计划" />
+            </div>
+            <div class="field">
+              <label>目标 GMV</label>
+              <input data-goal-key="target_gmv" type="number" min="0" step="0.01" value="${escapeHtml(form.target_gmv || "")}" placeholder="1000000" />
+            </div>
+            <div class="field">
+              <label>开始日期</label>
+              <input data-goal-key="start_date" type="date" value="${escapeHtml(form.start_date || "")}" />
+            </div>
+            <div class="field">
+              <label>结束日期</label>
+              <input data-goal-key="end_date" type="date" value="${escapeHtml(form.end_date || "")}" />
+            </div>
+            <div class="field" style="grid-column:1 / -1">
+              <label>目标说明</label>
+              <textarea data-goal-key="description" placeholder="例如：双十一预热期，目标聚焦单月 GMV 与 Sessions 提升。">${escapeHtml(form.description || "")}</textarea>
+            </div>
+            <label class="goal-toggle">
+              <input data-goal-key="is_active" type="checkbox" ${form.is_active ? "checked" : ""} />
+              <span>设为活动目标</span>
+            </label>
+          </div>
+          <div class="button-row">
+            <button class="ghost-btn" data-action="new-goal">＋ 新建空白目标</button>
+            <button class="ghost-btn" data-action="pause-goal" data-goal-id="${escapeHtml(form.id || activeGoalId)}">停用当前活动目标</button>
+            <button class="primary-btn" data-action="save-goal">保存目标</button>
+          </div>
+        </div>
       </div>
     </div>
-    ${section("目标列表", "长期维护经营目标，同一时间仅允许一个 Active Goal", "", tableCard("", ["目标名称", "开始日期", "结束日期", "Target GMV", "状态", "当前达成率", "操作"], [
-      ["2026年Q4 增长目标", "2026-10-01", "2026-12-31", "US$2,500,000.00", '<span class="status gray">已停用</span>', "80.38%", "启用  ✎  🗑"],
-      ["• 2026年9月 GMV百万计划", "2026-09-01", "2026-09-30", "US$1,000,000.00", '<span class="status gray">未开始</span>', "—", "停用  ✎  🗑"],
-      ["2026年6月 增长目标", "2026-06-01", "2026-06-30", "US$300,000.00", '<span class="status">已完成</span>', "108.33%", "✎  🗑"],
-    ]))}
-    ${section("历史目标", "已结算与进行中的目标达成情况", "", `<div class="grid cols-2">
-      <div class="card pad"><div class="metric-head"><div><div class="section-title">2026年9月 GMV百万计划</div><div class="muted">2026-09-01 → 2026-09-30</div></div><span class="status">进行中</span></div><div class="placeholder-line"></div><div class="metric-head"><span class="muted">目标</span><div class="metric-value">US$1,000,000.00</div></div></div>
-      <div class="card pad"><div class="metric-head"><div><div class="section-title">2026年6月增长目标</div><div class="muted">2026-06-01 → 2026-06-30</div></div><span class="status">已完成</span></div><div class="placeholder-line"></div><div class="metric-head"><span class="muted">当前达成率</span><div class="metric-value" style="color:var(--green)">108.33%</div></div></div>
-    </div>`)}
+    ${section("目标列表", "长期维护经营目标，同一时间仅允许一个 Active Goal", "", tableCard("", ["目标名称", "开始日期", "结束日期", "Target GMV", "状态", "当前达成率", "操作"], listRows))}
+    ${section("历史目标", "已结算与进行中的目标达成情况", "", `<div class="grid cols-2">${historyCards}</div>`)}
   `;
 }
 
@@ -1287,6 +1375,7 @@ function render() {
     coupons: couponsPage,
   };
   app.innerHTML = layout(pages[page]());
+  if (page === "goals") loadGoals();
   if (page === "integration") loadIntegrationConfigs();
   if (page === "coupons") loadCoupons();
   hydrateDashboardData();
@@ -1439,6 +1528,31 @@ async function handleAction(action, button) {
     return;
   }
 
+  if (action === "save-goal") {
+    await saveGoal();
+    return;
+  }
+
+  if (action === "activate-goal") {
+    await setGoalActive(button?.dataset.goalId, true);
+    return;
+  }
+
+  if (action === "pause-goal") {
+    await setGoalActive(button?.dataset.goalId, false);
+    return;
+  }
+
+  if (action === "edit-goal") {
+    editGoal(button?.dataset.goalId);
+    return;
+  }
+
+  if (action === "delete-goal") {
+    await deleteGoal(button?.dataset.goalId);
+    return;
+  }
+
   if (action === "disconnect-source") {
     await disconnectSource(button);
     return;
@@ -1447,9 +1561,6 @@ async function handleAction(action, button) {
   const messages = {
     logout: "这是演示前台，真实登录退出需要接 Supabase Auth。",
     notifications: "暂无新通知。",
-    "new-goal": "已打开新增目标入口；接 Supabase 后可保存到 goals 表。",
-    "edit-goal": "已进入目标编辑状态；下一步可接弹窗表单。",
-    "pause-goal": "已模拟停用当前目标。",
     "sync-coupons": "已模拟同步订单分类；真实环境会触发 Vercel API。",
     "new-coupon": "已打开新增券码入口；接 Shopify 后可同步 Price Rule。",
     "edit-coupon": "已进入券码编辑状态。",
@@ -1459,7 +1570,153 @@ async function handleAction(action, button) {
     "test-source": "连接测试已触发。",
     "manual-sync": "已触发手动同步任务。",
   };
+  if (action === "new-goal") {
+    state.goalForm = defaultGoalForm();
+    render();
+    showToast("已切换到空白目标表单。");
+    return;
+  }
   showToast(messages[action] || "操作已触发。");
+}
+
+async function loadGoals() {
+  try {
+    const response = await fetch("/api/goals");
+    if (!response.ok) return;
+    const data = await response.json();
+    if (!data.ok) return;
+    state.goalsData = data;
+    if (!state.goalForm || !state.goalForm.id) {
+      state.goalForm = defaultGoalForm(data.active_goal);
+    } else {
+      const match = (data.goals || []).find((goal) => goal.id === state.goalForm.id);
+      if (match) state.goalForm = defaultGoalForm(match);
+    }
+    if (data.primary_shop?.shop_name) updateStoreIdentity(data.primary_shop.shop_name);
+    if (currentPage() === "goals") {
+      app.innerHTML = layout(goalsPage());
+    }
+  } catch {
+    // Keep local fallback content if API is unavailable.
+  }
+}
+
+function defaultGoalForm(goal = null) {
+  return {
+    id: goal?.id || "",
+    name: goal?.name || "",
+    description: goal?.description || "",
+    start_date: goal?.start_date || "",
+    end_date: goal?.end_date || "",
+    target_gmv: goal?.target_gmv || "",
+    is_active: Boolean(goal?.is_active || goal?.status === "active"),
+  };
+}
+
+function goalStatusBadge(goal) {
+  if (goal?.is_active || goal?.status === "active") return '<span class="status">活动中</span>';
+  if (goal?.status === "completed") return '<span class="status">已完成</span>';
+  if (goal?.status === "inactive") return '<span class="status gray">已停用</span>';
+  return '<span class="status gray">待开始</span>';
+}
+
+function readGoalForm() {
+  const values = {};
+  document.querySelectorAll("[data-goal-key]").forEach((input) => {
+    values[input.dataset.goalKey] = input.type === "checkbox" ? input.checked : input.value;
+  });
+  return values;
+}
+
+function editGoal(goalId) {
+  const goal = state.goalsData?.goals?.find((item) => item.id === goalId);
+  if (!goal) return showToast("没有找到这条目标。");
+  state.goalForm = defaultGoalForm(goal);
+  render();
+  showToast(`已载入目标：${goal.name}`);
+}
+
+async function saveGoal() {
+  if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
+  const form = readGoalForm();
+
+  try {
+    const response = await fetch("/api/goals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${state.integrationSecret}`,
+      },
+      body: JSON.stringify({
+        ...form,
+        target_gmv: Number(form.target_gmv || 0),
+        status: form.is_active ? "active" : "draft",
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "保存失败");
+    showToast("目标已保存。");
+    await loadGoals();
+    invalidateDashboardData();
+    await hydrateDashboardData();
+  } catch (error) {
+    showToast(`保存失败：${error.message}`);
+  }
+}
+
+async function setGoalActive(goalId, isActive) {
+  const id = String(goalId || state.goalsData?.active_goal?.id || state.goalForm?.id || "").trim();
+  if (!id) return showToast("没有找到要更新的目标。");
+  if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
+
+  try {
+    const response = await fetch("/api/goals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${state.integrationSecret}`,
+      },
+      body: JSON.stringify({
+        id,
+        is_active: isActive,
+        status: isActive ? "active" : "inactive",
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "更新失败");
+    showToast(isActive ? "已启用为活动目标。" : "已停用当前目标。");
+    await loadGoals();
+    invalidateDashboardData();
+    await hydrateDashboardData();
+  } catch (error) {
+    showToast(`更新失败：${error.message}`);
+  }
+}
+
+async function deleteGoal(goalId) {
+  const id = String(goalId || "").trim();
+  if (!id) return showToast("没有找到要删除的目标。");
+  if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
+
+  try {
+    const response = await fetch("/api/goals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${state.integrationSecret}`,
+      },
+      body: JSON.stringify({ action: "delete", id }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "删除失败");
+    if (state.goalForm?.id === id) state.goalForm = defaultGoalForm();
+    showToast("目标已删除。");
+    await loadGoals();
+    invalidateDashboardData();
+    await hydrateDashboardData();
+  } catch (error) {
+    showToast(`删除失败：${error.message}`);
+  }
 }
 
 async function saveIntegration(button) {
@@ -1989,6 +2246,82 @@ function applyDashboardData(data) {
 
     ensureSimulatorState(activeGoal);
     updateGrowthSimulator(activeGoal);
+  } else {
+    const goalName = document.querySelector("[data-goal-name]");
+    if (goalName) goalName.textContent = "暂无 Active Goal";
+
+    const goalPeriod = document.querySelector("[data-goal-period]");
+    if (goalPeriod) goalPeriod.textContent = `当前范围 ${activeRangeLabel()} · 尚未启用目标`;
+
+    const goalStatus = document.querySelector("[data-goal-status]");
+    if (goalStatus) goalStatus.innerHTML = pill("未设置目标", "orange");
+
+    const goalProgressLabel = document.querySelector("[data-goal-progress-label]");
+    if (goalProgressLabel) goalProgressLabel.innerHTML = "当前目标达成率 <span>0.00%</span> / 目标";
+
+    const goalProgressValue = document.querySelector("[data-goal-progress-value]");
+    if (goalProgressValue) goalProgressValue.innerHTML = `${formatCurrency(0)} / ${formatCurrency(0)}`;
+
+    const goalProgressBar = document.querySelector("[data-goal-progress-bar]");
+    if (goalProgressBar) goalProgressBar.style.width = "0%";
+
+    const goalSummary = document.querySelector("[data-goal-summary]");
+    if (goalSummary) {
+      goalSummary.innerHTML = [
+        ["目标月份", "—"],
+        ["目标 GMV", formatCurrency(0)],
+        ["当前月度能力", formatCurrency(0), "var(--green)"],
+        ["目标差距", formatCurrency(0), "var(--red)"],
+        [`${activeRangeLabel()} GMV`, formatCurrency(summary.gmv)],
+      ]
+        .map(
+          ([label, value, color]) => `
+            <div class="card pad">
+              <div class="metric-label">${label}</div>
+              <div class="metric-value" style="${color ? `color:${color}` : ""}">${value}</div>
+            </div>
+          `,
+        )
+        .join("");
+    }
+
+    const goalBreakdown = document.querySelector("[data-goal-breakdown]");
+    if (goalBreakdown) {
+      goalBreakdown.innerHTML = goalBreakdownPanel("目标拆解", "Target Breakdown", [
+        ["达标所需日均 GMV", "Required Daily GMV", formatCurrency(0)],
+        ["达标所需日均订单数", "Required Daily Orders", formatNumber(0)],
+        ["达标所需月订单数", "Required Monthly Orders", formatInteger(0)],
+        ["达标所需 Sessions", "Required Monthly Sessions", formatInteger(0)],
+        ["当前 AOV", "Current AOV", formatCurrency(summary.aov)],
+        ["当前 CVR", "Current CVR", `${formatNumber(data.ga4_funnel?.cvr)}%`],
+      ]);
+    }
+
+    const currentCapability = document.querySelector("[data-current-capability]");
+    if (currentCapability) {
+      currentCapability.innerHTML = goalBreakdownPanel("当前能力评估", "Current Capability", [
+        ["当前月度 GMV Run Rate", "Monthly GMV Run Rate", formatCurrency(0), "var(--green)"],
+        ["当前月度订单 Run Rate", "Monthly Orders Run Rate", formatInteger(0)],
+        ["当前月度 Sessions Run Rate", "Monthly Sessions Run Rate", formatInteger(0)],
+        ["当前 CVR", "Current CVR", `${formatNumber(data.ga4_funnel?.cvr)}%`],
+        ["当前 AOV", "Current AOV", formatCurrency(summary.aov)],
+        ["预测月 GMV", "Forecast Month GMV", formatCurrency(0), "var(--green)"],
+      ]);
+    }
+
+    const growthSimulator = document.querySelector("[data-growth-simulator]");
+    if (growthSimulator) {
+      growthSimulator.innerHTML = renderGrowthSimulator({
+        id: "empty",
+        start_date: data.range?.start || "",
+        end_date: data.range?.end || "",
+        target_gmv: 0,
+        monthly_sessions_run_rate: 0,
+        current_cvr: data.ga4_funnel?.cvr || 0,
+        current_aov: summary.aov || 0,
+        required_monthly_sessions: 0,
+      });
+    }
   }
 
   const northstarRevenue = document.querySelector("[data-northstar-revenue]");
@@ -2054,7 +2387,7 @@ function applyDashboardData(data) {
   }
 
   const marketingOverview = document.querySelector("[data-marketing-overview]");
-  if (marketingOverview && (data.ad_performance?.length || data.ga4_funnel?.sessions)) {
+  if (marketingOverview) {
     marketingOverview.innerHTML = section(
       "营销概览",
       "广告平台与站内转化汇总",
@@ -2070,7 +2403,7 @@ function applyDashboardData(data) {
   }
 
   const marketingChannelTable = document.querySelector("[data-marketing-channel-table]");
-  if (marketingChannelTable && channelMix.length) {
+  if (marketingChannelTable) {
     marketingChannelTable.innerHTML = section(
       "渠道表现",
       "按渠道汇总广告表现与站内收入",
@@ -2078,7 +2411,7 @@ function applyDashboardData(data) {
       tableCard(
         "",
         ["渠道", "花费", "销售额", "订单数", "客户数", "ROAS", "CPA", "CVR"],
-        channelMix.map((row) => [
+        (channelMix.length ? channelMix : [{ channel: "暂无数据", spend: 0, revenue: 0, orders: 0, customers: 0, roas: 0, cpa: 0, cvr: 0 }]).map((row) => [
           escapeHtml(row.channel),
           formatCurrency(row.spend),
           formatCurrency(row.revenue),
@@ -2093,7 +2426,7 @@ function applyDashboardData(data) {
   }
 
   const marketingFunnel = document.querySelector("[data-marketing-funnel]");
-  if (marketingFunnel && funnelSteps.length) {
+  if (marketingFunnel) {
     marketingFunnel.innerHTML = section(
       "营销漏斗",
       "Shopify + GA4 + 广告平台",
@@ -2115,7 +2448,7 @@ function applyDashboardData(data) {
   }
 
   const aarrrAcquisition = document.querySelector("[data-aarrr-acquisition]");
-  if (aarrrAcquisition && (data.ga4_funnel?.sessions || data.ad_performance?.length || channelMix.length)) {
+  if (aarrrAcquisition) {
     aarrrAcquisition.innerHTML = stage(
       "A",
       "Acquisition",
@@ -2153,7 +2486,7 @@ function applyDashboardData(data) {
   }
 
   const aarrrActivation = document.querySelector("[data-aarrr-activation]");
-  if (aarrrActivation && (data.ga4_funnel?.sessions || data.ga4_funnel?.add_to_carts || data.ga4_funnel?.purchases)) {
+  if (aarrrActivation) {
     aarrrActivation.innerHTML = stage(
       "A",
       "Activation",

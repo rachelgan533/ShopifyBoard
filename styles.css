@@ -861,6 +861,50 @@ tr:last-child td {
   padding: 24px;
 }
 
+.goal-settings-grid {
+  align-items: start;
+}
+
+.goal-form-grid {
+  margin-top: 12px;
+}
+
+.goal-quick-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.goal-quick-stats .metric-value {
+  font-size: 18px;
+  margin-top: 6px;
+}
+
+.goal-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.goal-toggle input {
+  width: 16px;
+  height: 16px;
+}
+
+.goal-history-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.goal-history-status {
+  font-size: 18px;
+}
+
 .form-grid {
   display: grid;
   gap: 14px;
@@ -1097,6 +1141,11 @@ tr:last-child td {
   .cols-3,
   .cols-2 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .goal-quick-stats,
+  .goal-history-grid {
+    grid-template-columns: 1fr;
   }
 }
 
