@@ -25,12 +25,12 @@ module.exports = async function handler(req, res) {
 
       const current = await getIntegration(source);
       const currentConfig = current?.config || {};
-      const nextConfig = mergeConfig(currentConfig, body.config || {});
+      const nextConfig = normalizeSourceConfig(source, mergeConfig(currentConfig, body.config || {}));
       const shopId = source === "shopify" ? await upsertPrimaryShop(nextConfig) : current?.shop_id || null;
       const row = {
         ...(shopId ? { shop_id: shopId } : {}),
         source,
-        status: body.status || "connected",
+        status: body.status || current?.status || "configured",
         config: nextConfig,
         last_connected_at: new Date().toISOString(),
       };
@@ -127,6 +127,28 @@ function mergeConfig(current, incoming) {
     if (!text || text === "********" || text.includes("已保存")) continue;
     next[key] = text;
   }
+  return next;
+}
+
+function normalizeSourceConfig(source, config) {
+  if (source !== "ga4") return config;
+  const next = { ...config };
+  const propertyId = String(next.property_id || "").trim();
+  if (propertyId) next.property_id = propertyId.replace(/^properties\//, "");
+  const lookbackDays = Number(next.lookback_days || next.sync_interval || 30);
+  next.lookback_days = String(Math.max(1, lookbackDays));
+
+  const jsonText = String(next.service_account_json || "").trim();
+  if (jsonText && !jsonText.includes("已保存")) {
+    try {
+      const parsed = JSON.parse(jsonText);
+      if (parsed.client_email) next.google_account_email = parsed.client_email;
+      if (parsed.project_id) next.google_project_id = parsed.project_id;
+    } catch {
+      // Let sync/test surface JSON validation errors.
+    }
+  }
+
   return next;
 }
 

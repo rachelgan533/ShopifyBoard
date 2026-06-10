@@ -296,13 +296,14 @@ function metricCard(label, value, delta = "+0.00%", source = "Shopify", series =
           <div class="metric-label">${label}</div>
           <div class="metric-value" ${key ? `data-metric="${key}"` : ""}>${value}</div>
         </div>
-        <div>
+        <div class="metric-side">
           ${pill(source)}
           <div class="delta ${down ? "down" : ""}" style="margin-top:18px">${down ? "↘" : "↗"} ${delta}</div>
+          <div class="small-label metric-compare-label">vs 上一周期</div>
         </div>
       </div>
       ${sparkline(series, key)}
-      <div class="small-label">较上期</div>
+      <div class="small-label">当前时间段趋势</div>
     </div>
   `;
 }
@@ -349,13 +350,13 @@ function mockMetric(label, value, source = "Google Ads", series = [24, 24, 24, 2
   return `
     <div class="card mock-card" ${key ? `data-series-key="${key}"` : ""}>
       <div class="mock-head"><span>MOCK DATA</span><span>演示数据</span></div>
-      <div class="mock-tags"><span class="mock-tag">${source}</span><span class="mock-tag">Meta Ads</span></div>
+      <div class="mock-tags"><span class="mock-tag">${source}</span><span class="mock-tag">示例趋势</span></div>
       <div class="metric-card">
         <div class="metric-label">${label}</div>
         <div class="metric-value">${value}</div>
-        <div class="delta" style="float:right">↗ +0.00%</div>
+        <div class="delta" style="float:right;color:var(--orange)">示例</div>
         ${sparkline(series, key)}
-        <div class="small-label">较上期</div>
+        <div class="small-label">当前时间段趋势（示例）</div>
       </div>
     </div>
   `;
@@ -557,6 +558,7 @@ function simulatorSliderConfig(goal, result) {
   return {
     sessions: {
       label: "Sessions (月)",
+      subtitle: "Monthly Sessions",
       min: 0,
       max: Math.max(Math.ceil(sessionsBase * 2.2), 5000),
       step: 100,
@@ -565,6 +567,7 @@ function simulatorSliderConfig(goal, result) {
     },
     cvr: {
       label: "CVR",
+      subtitle: "Conversion Rate",
       min: 0,
       max: Math.max(Math.ceil(cvrBase * 2.5), 8),
       step: 0.01,
@@ -573,6 +576,7 @@ function simulatorSliderConfig(goal, result) {
     },
     aov: {
       label: "AOV",
+      subtitle: "Average Order Value",
       min: 0,
       max: Math.max(Math.ceil(aovBase * 2.2), 300),
       step: 1,
@@ -590,6 +594,15 @@ function renderGrowthSimulator(goal) {
     ["cvr", sliders.cvr],
     ["aov", sliders.aov],
   ];
+  const target = Math.max(Number(goal.target_gmv || 0), 1);
+  const forecastRatio = Math.min((result.forecast / target) * 100, 100);
+  const gapRatio = result.gap / target;
+  const status =
+    gapRatio <= 0.05
+      ? { label: "接近达成", color: "", amountColor: "var(--green)" }
+      : gapRatio <= 0.2
+        ? { label: "仍有差距", color: "orange", amountColor: "var(--orange)" }
+        : { label: "严重偏离", color: "red", amountColor: "var(--red)" };
 
   return `
     <div class="card pad">
@@ -603,9 +616,14 @@ function renderGrowthSimulator(goal) {
         <div>
           ${rows
             .map(
-              ([key, config]) => `
-                <label class="slider-row" for="sim-${key}">
-                  <div class="slider-label">${config.label}</div>
+              ([key, config]) => {
+                const percent = ((Number(config.value) - Number(config.min)) / Math.max(Number(config.max) - Number(config.min), 1)) * 100;
+                return `
+                <label class="slider-row slider-row-rich" for="sim-${key}">
+                  <div class="slider-copy">
+                    <div class="slider-label">${config.label}</div>
+                    <div class="section-subtitle">${config.subtitle}</div>
+                  </div>
                   <input
                     id="sim-${key}"
                     class="sim-range"
@@ -614,25 +632,30 @@ function renderGrowthSimulator(goal) {
                     max="${config.max}"
                     step="${config.step}"
                     value="${config.value}"
+                    style="--fill:${Math.max(0, Math.min(percent, 100)).toFixed(2)}%;"
                     data-sim-key="${key}"
                   />
                   <div class="slider-value">${config.display}</div>
                 </label>
-              `,
+              `;
+              },
             )
             .join("")}
         </div>
         <div class="card pad simulator-result">
           <div class="metric-label">模拟结果</div>
+          <div class="section-subtitle">Simulation Result</div>
           <div class="metric-value" style="color:var(--green)">${formatCurrency(result.forecast)}</div>
           <div class="muted">Sessions × CVR × AOV</div>
           <div class="simulator-gap">
             <span>距离目标</span>
-            <strong style="color:var(--red)">${formatCurrency(result.gap)}</strong>
+            <strong style="color:${status.amountColor}">${formatCurrency(result.gap)}</strong>
           </div>
+          <div style="margin-top:12px">${pill(status.label, status.color)}</div>
           <div class="progress" style="margin-top:12px">
-            <span style="width:${Math.min((result.forecast / Math.max(Number(goal.target_gmv || 1), 1)) * 100, 100)}%"></span>
+            <span style="width:${forecastRatio}%"></span>
           </div>
+          <button class="ghost-btn simulator-reset" data-action="reset-simulator" style="margin-top:18px">重置为当前能力</button>
         </div>
       </div>
     </div>
@@ -745,70 +768,18 @@ function personasPage() {
   return `
     <p class="intro">跨渠道人群画像分析：综合 GA4、Google Ads、Meta Ads 与 Shopify 客户数据，识别核心人群与价值分层。</p>
     ${sourceTabs(activeSource)}
-    <div class="sync-bar">Last Sync Time: <strong>2026年6月9日 09:09</strong></div>
-    ${section("人群属性", "综合各渠道汇总的人群性别与年龄结构", `${pill("GA4")} ${pill("Google Ads", "red")} ${pill("Meta Ads", "red")} ${pill("Shopify")}`, `
-      <div class="grid cols-2">
-        ${donutCard("性别分布", [["Female", 59.8], ["Male", 40.2]])}
-        ${barChartCard("年龄分布", [["35-44", 6600], ["25-34", 6100], ["45-54", 4700], ["55-64", 2900], ["18-24", 1400], ["65+", 1260]])}
-      </div>
-    `)}
-    ${section("地区与设备", "跨渠道地区与设备分布", "", `
-      <div class="grid cols-2">
-        ${tableCard("地区分布", ["地区分布", "Users", "占比"], [
-          ["United States (US)", "1,306", "95.89%"],
-          ["United Kingdom (GB)", "35", "2.57%"],
-          ["Canada (CA)", "8", "0.59%"],
-          ["Germany (DE)", "6", "0.44%"],
-          ["France (FR)", "3", "0.22%"],
-          ["Australia (AU)", "2", "0.15%"],
-          ["PT (PT)", "1", "0.07%"],
-          ["NL (NL)", "1", "0.07%"],
-        ])}
-        ${donutCard("访问设备明细", [["Mobile", 91.79], ["Desktop", 6.59], ["Tablet", 1.63]], ["#00896b", "#19a186", "#64c3a8"])}
-      </div>
-    `)}
-    ${section("兴趣标签", "", "", tableCard("兴趣标签", ["兴趣类别", "Affinity", "占比"], [
-      ["News & Politics/Avid News Readers", "100.0", "5.72%"],
-      ["Food & Dining/Cooking Enthusiasts/Aspiring Chefs", "92.5", "5.30%"],
-      ["Shoppers/Shopping Enthusiasts", "89.7", "5.14%"],
-      ["News & Politics/Avid News Readers/Entertainment News Enthusiasts", "87.4", "5.00%"],
-      ["Lifestyles & Hobbies/Shutterbugs", "62.3", "3.56%"],
-      ["Travel/Travel Buffs", "59.8", "3.43%"],
-      ["Technology/Social Media Enthusiasts", "53.6", "3.07%"],
-      ["Home & Garden/Home Decor Enthusiasts", "52.4", "3.00%"],
-      ["Others", "1057.7", "60.50%"],
-    ]))}
-    ${section("客户价值画像", "", "", tableCard("客户价值画像", ["价值分层", "客户数", "销售额", "客单价", "占比"], [
-      ["New", "1,292", "US$245,830.21", "US$190.27", "94.86%"],
-      ["Champions", "19", "US$5,635.06", "US$296.58", "1.40%"],
-      ["Loyal", "51", "US$4,688.71", "US$91.94", "3.74%"],
-    ]))}
+    <div class="sync-bar">Last Sync Time: <strong>${state.dashboardData?.sync?.last_synced_at ? formatDateTime(state.dashboardData.sync.last_synced_at) : "等待同步"}</strong></div>
+    <div data-persona-overview>${personaEmptyState("正在加载用户画像数据…")}</div>
   `;
 }
 
 function personasSourcePage(source) {
-  const isMock = source === "Google Ads" || source === "Meta Ads";
+  const sourceKey = source === "GA4" ? "ga4" : source === "Google Ads" ? "google_ads" : "meta_ads";
   return `
     <p class="intro">${source} 受众维度：Gender、Age、Interests、Language、Country/City、Device。</p>
     ${sourceTabs(source)}
-    <div class="sync-bar">Last Sync Time: <strong>${isMock ? "等待授权同步" : "2026年6月8日 14:10"}</strong></div>
-    ${section(`${source} ${isMock ? pill("演示数据", "orange") : pill(source === "GA4" ? "GA4" : source, source === "GA4" ? "" : "red")}`, isMock ? "连接广告账户后自动替换为真实受众数据" : "真实维度数据", "", `
-      <div class="grid cols-2">
-        ${donutCard("性别分布", [["Female", 59.8], ["Male", 40.2]])}
-        ${barChartCard("年龄分布", [["35-44", 6600], ["25-34", 6100], ["45-54", 4700], ["55-64", 2900], ["18-24", 1400], ["65+", 1260]])}
-      </div>
-    `)}
-    ${section("兴趣标签", "", "", tableCard("兴趣标签", ["兴趣类别", "Affinity", "占比"], [
-      ["News & Politics/Avid News Readers", "100.0", "5.72%"],
-      ["Food & Dining/Cooking Enthusiasts/Aspiring Chefs", "92.5", "5.30%"],
-      ["Shoppers/Shopping Enthusiasts", "89.7", "5.14%"],
-      ["Technology/Social Media Enthusiasts", "53.6", "3.07%"],
-      ["Others", "1057.7", "60.50%"],
-    ]))}
-    <div class="grid cols-2">
-      ${donutCard("Language", [["en-US", 90.64], ["en-GB", 2.36], ["en-CA", 1.58], ["de-DE", 0.79], ["Others", 4.63]], ["#00896b", "#19a186", "#6375d6", "#f59e0b", "#8e98aa"])}
-      ${donutCard("访问设备明细", [["Mobile", 91.79], ["Desktop", 6.59], ["Tablet", 1.63]], ["#00896b", "#19a186", "#64c3a8"])}
-    </div>
+    <div class="sync-bar">Last Sync Time: <strong>${state.dashboardData?.sync?.last_synced_at ? formatDateTime(state.dashboardData.sync.last_synced_at) : "等待同步"}</strong></div>
+    <div data-persona-source="${sourceKey}">${personaEmptyState(source === "GA4" ? "正在加载 GA4 画像数据…" : `等待 ${source} 真实受众数据同步`)}</div>
   `;
 }
 
@@ -816,45 +787,110 @@ function personasShopifyPage() {
   return `
     <p class="intro">跨渠道人群画像分析：综合 GA4、Google Ads、Meta Ads 与 Shopify 客户数据，识别核心人群与价值分层。</p>
     ${sourceTabs("Shopify")}
-    <div class="sync-bar">Last Sync Time: <strong>2026年6月9日 09:09</strong></div>
-    ${section("Shopify", "Shopify 客户画像：Country/State/City、New vs Returning、AOV、LTV、Repeat Purchase Rate、Order Count", pill("Shopify"), `
-      <div class="grid cols-3">
-        ${tableCard("国家分布", ["地区分布", "Users", "占比"], [
-          ["United States (US)", "1,306", "95.89%"],
-          ["United Kingdom (GB)", "35", "2.57%"],
-          ["Canada (CA)", "8", "0.59%"],
-          ["Germany (DE)", "6", "0.44%"],
-          ["France (FR)", "3", "0.22%"],
-          ["Australia (AU)", "2", "0.15%"],
-          ["Others", "2", "0.14%"],
-        ])}
-        ${tableCard("州/省分布", ["地区分布", "Users", "占比"], [
-          ["纽约 (NY)", "126", "9.25%"],
-          ["佛罗里达 (FL)", "126", "9.25%"],
-          ["加利福尼亚 (CA)", "124", "9.10%"],
-          ["德克萨斯 (TX)", "110", "8.08%"],
-          ["佐治亚 (GA)", "94", "6.90%"],
-          ["新泽西 (NJ)", "71", "5.21%"],
-          ["Others", "449", "32.95%"],
-        ])}
-        ${tableCard("City", ["地区分布", "Users", "占比"], [
-          ["Brooklyn (NY)", "27", "1.98%"],
-          ["Chicago (IL)", "21", "1.54%"],
-          ["Bronx (NY)", "20", "1.47%"],
-          ["Houston (TX)", "17", "1.25%"],
-          ["Atlanta (GA)", "15", "1.10%"],
-          ["Others", "1,208", "86.61%"],
-        ])}
+    <div class="sync-bar">Last Sync Time: <strong>${state.dashboardData?.sync?.last_synced_at ? formatDateTime(state.dashboardData.sync.last_synced_at) : "等待同步"}</strong></div>
+    <div data-persona-shopify>${personaEmptyState("正在加载 Shopify 客户画像…")}</div>
+  `;
+}
+
+function personaEmptyState(message) {
+  return `<div class="card pad mock-empty"><div class="mock-head"><span>REAL DATA MISSING</span><span>等待同步</span></div><div class="muted" style="margin-top:12px">${message}</div></div>`;
+}
+
+function renderPersonaOverviewSections(audience, shopifyPersona) {
+  return `
+    ${section("人群属性", "综合各渠道汇总的人群性别与年龄结构", `${pill("GA4")} ${pill("Google Ads", "red")} ${pill("Meta Ads", "red")} ${pill("Shopify")}`, `
+      <div class="grid cols-2">
+        ${renderAudienceDonut("性别分布", audience.gender)}
+        ${renderAudienceBar("年龄分布", audience.age)}
       </div>
     `)}
-    ${section("New vs Returning", "", "", donutCard("New vs Returning", [["New Customers", 94.9], ["Returning Customers", 5.1]]))}
-    ${section("客户指标", "", "", `<div class="grid cols-4">
-      ${metricCard("客单价", "US$186.02", "-26.57%")}
-      ${metricCard("LTV（生命周期价值）", "US$76.58", "+0.00%")}
-      ${metricCard("复购率", "5.30%", "+66.85%")}
-      ${metricCard("订单数", "1,377", "-23.24%")}
-    </div>`)}
+    ${section("地区与设备", "跨渠道地区与设备分布", "", `
+      <div class="grid cols-2">
+        ${renderAudienceTable("地区分布", "地区分布", audience.country)}
+        ${renderAudienceDonut("访问设备明细", audience.device, ["#00896b", "#19a186", "#64c3a8", "#8e98aa"])}
+      </div>
+    `)}
+    ${section("兴趣标签", "", "", renderInterestTable(audience.interest))}
+    ${section("客户价值画像", "", "", renderShopifyValueTable(shopifyPersona.value_segments || []))}
   `;
+}
+
+function renderPersonaSourceSections(source, snapshot) {
+  if (!snapshot || !hasAudienceData(snapshot)) {
+    return `${section(`${source} ${source === "GA4" ? pill("GA4") : pill(source, "red")}`, "当前还没有可用的真实受众快照", "", personaEmptyState("先在集成设置里完成连接并手动同步，受众数据进 Supabase 后这里会自动替换。"))}`;
+  }
+
+  return `
+    ${section(`${source} ${source === "GA4" ? pill("GA4") : pill(source, "red")}`, `最新快照日期：${snapshot.latest_day || "—"}`, "", `
+      <div class="grid cols-2">
+        ${renderAudienceDonut("性别分布", snapshot.gender)}
+        ${renderAudienceBar("年龄分布", snapshot.age)}
+      </div>
+    `)}
+    ${section("兴趣标签", "", "", renderInterestTable(snapshot.interest))}
+    <div class="grid cols-2">
+      ${renderAudienceDonut("Language", snapshot.language, ["#00896b", "#19a186", "#6375d6", "#f59e0b", "#8e98aa"])}
+      ${renderAudienceDonut("访问设备明细", snapshot.device, ["#00896b", "#19a186", "#64c3a8", "#8e98aa"])}
+    </div>
+    <div class="grid cols-2">
+      ${renderAudienceTable("国家分布", "地区分布", snapshot.country)}
+      ${renderAudienceTable("City", "地区分布", snapshot.city)}
+    </div>
+  `;
+}
+
+function renderShopifyPersonaSections(persona) {
+  return `
+    ${section("Shopify", "Shopify 客户画像：Country/State/City、New vs Returning、AOV、LTV、Repeat Purchase Rate、Order Count", pill("Shopify"), `
+      <div class="grid cols-3">
+        ${renderAudienceTable("国家分布", "地区分布", persona.country)}
+        ${renderAudienceTable("州/省分布", "地区分布", persona.province)}
+        ${renderAudienceTable("City", "地区分布", persona.city)}
+      </div>
+    `)}
+    ${section("New vs Returning", "", "", `
+      <div class="grid cols-2">
+        ${renderAudienceDonut("New vs Returning", persona.new_vs_returning)}
+        <div class="grid cols-2">
+          ${metricCard("客单价", formatCurrency(persona.metrics?.aov), "+0.00%", "Shopify", metricSeries)}
+          ${metricCard("LTV（生命周期价值）", formatCurrency(persona.metrics?.ltv), "+0.00%", "Shopify", trendSeries)}
+          ${metricCard("复购率", `${formatNumber(persona.metrics?.repeat_rate)}%`, "+0.00%", "Shopify", spikySeries)}
+          ${metricCard("订单数", formatInteger(persona.metrics?.orders), "+0.00%", "Shopify", metricSeries)}
+        </div>
+      </div>
+    `)}
+    ${section("客户价值画像", "", "", renderShopifyValueTable(persona.value_segments || []))}
+  `;
+}
+
+function renderAudienceDonut(title, rows, colors) {
+  if (!rows?.length) return personaEmptyState(`${title} 暂无真实数据`);
+  return donutCard(title, rows.slice(0, 8).map((row) => [row.name, Number(row.percentage || row.value || 0)]), colors);
+}
+
+function renderAudienceBar(title, rows) {
+  if (!rows?.length) return personaEmptyState(`${title} 暂无真实数据`);
+  return barChartCard(title, rows.slice(0, 8).map((row) => [row.name, Number(row.users || row.value || 0)]));
+}
+
+function renderAudienceTable(title, label, rows) {
+  if (!rows?.length) return personaEmptyState(`${title} 暂无真实数据`);
+  return tableCard(title, [label, "Users", "占比"], rows.slice(0, 12).map((row) => [escapeHtml(row.name), formatInteger(row.users), `${formatNumber(row.percentage)}%`]));
+}
+
+function renderInterestTable(rows) {
+  if (!rows?.length) return personaEmptyState("兴趣标签暂无真实数据");
+  return tableCard("兴趣标签", ["兴趣类别", "Affinity", "占比"], rows.slice(0, 12).map((row) => [escapeHtml(row.name), formatNumber(row.affinity || row.users), `${formatNumber(row.percentage)}%`]));
+}
+
+function renderShopifyValueTable(rows) {
+  if (!rows?.length) return personaEmptyState("客户价值画像暂无真实数据");
+  const totalCustomers = rows.reduce((sum, row) => sum + Number(row.customers || 0), 0) || 1;
+  return tableCard("客户价值画像", ["价值分层", "客户数", "销售额", "客单价", "占比"], rows.map((row) => [escapeHtml(row.name || row.segment), formatInteger(row.customers), formatCurrency(row.revenue), formatCurrency(row.aov), `${formatNumber((Number(row.customers || 0) / totalCustomers) * 100)}%`]));
+}
+
+function hasAudienceData(snapshot) {
+  return ["gender", "age", "interest", "language", "country", "city", "device"].some((key) => Array.isArray(snapshot?.[key]) && snapshot[key].length);
 }
 
 function operationsPage() {
@@ -1192,8 +1228,8 @@ function integrationPage() {
       status: "未连接",
       fields: [
         ["property_id", "Property ID · GA4 属性 ID", ""],
+        ["lookback_days", "回溯天数 · 每次同步最近多少天", "30"],
         ["service_account_json", "Service Account JSON · 粘贴完整 JSON（仅服务端保存）", "", "textarea"],
-        ["sync_interval", "同步频率", "30"],
       ],
     },
     {
@@ -1253,12 +1289,12 @@ function integrationPage() {
                   <div class="metric-label" data-integration-field="status_text">未连接</div>
                 </div>
                 <div class="card pad">
-                  <div class="muted">Last Connected · 最近连接</div>
-                  <div class="metric-label" data-integration-field="last_connected_at">—</div>
+                  <div class="muted">${source === "ga4" ? "Google Account · 授权 Google 账号" : "Last Connected · 最近连接"}</div>
+                  <div class="metric-label" data-integration-field="${source === "ga4" ? "account_identity" : "last_connected_at"}">${source === "ga4" ? "未绑定" : "—"}</div>
                 </div>
                 <div class="card pad">
-                  <div class="muted">Last Tested · 最近测试</div>
-                  <div class="metric-label" data-integration-field="last_tested_at">—</div>
+                  <div class="muted">${source === "ga4" ? "Google Project · 项目标识" : "Last Tested · 最近测试"}</div>
+                  <div class="metric-label" data-integration-field="${source === "ga4" ? "project_identity" : "last_tested_at"}">${source === "ga4" ? "—" : "—"}</div>
                 </div>
                 <div class="card pad">
                   <div class="muted">Last Sync Time · 最近同步</div>
@@ -1500,6 +1536,11 @@ async function handleAction(action, button) {
     return;
   }
 
+  if (action === "reset-simulator") {
+    resetSimulator();
+    return;
+  }
+
   if (action === "save-source") {
     await saveIntegration(button);
     return;
@@ -1719,6 +1760,13 @@ async function deleteGoal(goalId) {
   }
 }
 
+function resetSimulator() {
+  if (!state.dashboardData?.active_goal) return;
+  state.simulator = null;
+  updateGrowthSimulator(state.dashboardData.active_goal);
+  showToast("已重置为当前能力。");
+}
+
 async function saveIntegration(button) {
   const card = button?.closest("[data-integration-card]");
   const source = button?.dataset.source || card?.dataset.integrationCard;
@@ -1737,7 +1785,7 @@ async function saveIntegration(button) {
         "content-type": "application/json",
         authorization: `Bearer ${state.integrationSecret}`,
       },
-      body: JSON.stringify({ source, config, status: "connected" }),
+      body: JSON.stringify({ source, config, status: source === "ga4" ? "configured" : "connected" }),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) throw new Error(data.error || "保存失败");
@@ -1858,12 +1906,28 @@ async function loadIntegrationConfigs() {
       const status = card.querySelector("[data-integration-status]");
       if (status) {
         status.textContent = integrationStatusLabel(item.status);
-        status.classList.toggle("gray", item.status !== "connected");
+        status.classList.toggle("gray", !["connected", "configured"].includes(item.status));
       }
       updateIntegrationField(card, "status_text", integrationStatusDetail(item.status));
       updateIntegrationField(card, "last_connected_at", formatMaybeDate(item.last_connected_at));
       updateIntegrationField(card, "last_tested_at", formatMaybeDate(item.last_tested_at));
       updateIntegrationField(card, "last_synced_at", formatMaybeDate(item.last_synced_at));
+      if (item.source === "ga4") {
+        updateIntegrationField(
+          card,
+          "account_identity",
+          item.config?.google_account_email
+            ? `已绑定（${item.config.google_account_email}）`
+            : item.status === "connected"
+              ? "已连接（邮箱未记录）"
+              : "未绑定",
+        );
+        updateIntegrationField(
+          card,
+          "project_identity",
+          item.config?.google_project_id || "—",
+        );
+      }
       if (item.source === "shopify") {
         const shopName = item.config?.shop_name || data.primary_shop?.shop_name;
         if (shopName) updateStoreIdentity(shopName);
@@ -1900,6 +1964,7 @@ function updateIntegrationField(card, key, value) {
 function integrationStatusLabel(status) {
   return {
     connected: "已连接",
+    configured: "已保存待测试",
     disconnected: "未连接",
     error: "异常",
     running: "同步中",
@@ -1909,6 +1974,7 @@ function integrationStatusLabel(status) {
 function integrationStatusDetail(status) {
   return {
     connected: "已连接",
+    configured: "已保存待测试",
     disconnected: "未连接",
     error: "连接异常",
     running: "同步中",
@@ -2093,6 +2159,34 @@ function applyDashboardData(data) {
   const syncBar = document.querySelector(".sync-bar");
   if (syncBar && data.sync?.last_synced_at) {
     syncBar.innerHTML = `Last Sync Time: <strong>${formatDateTime(data.sync.last_synced_at)}</strong>`;
+  }
+
+  const personaOverview = document.querySelector("[data-persona-overview]");
+  if (personaOverview) {
+    personaOverview.innerHTML = renderPersonaOverviewSections(
+      data.audience?.overview || {},
+      data.shopify_persona || {},
+    );
+  }
+
+  const personaGa4 = document.querySelector('[data-persona-source="ga4"]');
+  if (personaGa4) {
+    personaGa4.innerHTML = renderPersonaSourceSections("GA4", data.audience?.sources?.ga4 || {});
+  }
+
+  const personaGoogleAds = document.querySelector('[data-persona-source="google_ads"]');
+  if (personaGoogleAds) {
+    personaGoogleAds.innerHTML = renderPersonaSourceSections("Google Ads", data.audience?.sources?.google_ads || {});
+  }
+
+  const personaMetaAds = document.querySelector('[data-persona-source="meta_ads"]');
+  if (personaMetaAds) {
+    personaMetaAds.innerHTML = renderPersonaSourceSections("Meta Ads", data.audience?.sources?.meta_ads || {});
+  }
+
+  const personaShopify = document.querySelector("[data-persona-shopify]");
+  if (personaShopify) {
+    personaShopify.innerHTML = renderShopifyPersonaSections(data.shopify_persona || {});
   }
 
   const topProducts = document.querySelector("[data-top-products]");
@@ -2612,10 +2706,29 @@ function applyRealSparklineSeries(data) {
   document.querySelectorAll(".sparkline-wrap[data-series-key]").forEach((node) => {
     const key = node.dataset.seriesKey;
     const series = seriesMap[key];
-    if (!series?.length) return;
-    setSparklineSeries(node, series);
+    if (series?.length) {
+      setSparklineSeries(node, series);
+      return;
+    }
+    if (!node.closest(".mock-card")) {
+      setSparklineSeries(node, buildEmptyRangeSeries(data.range));
+    }
   });
   initializeSparklineTooltips();
+}
+
+function buildEmptyRangeSeries(range) {
+  const start = range?.start;
+  const end = range?.end;
+  if (!start || !end) return [{ label: "P1", value: 0 }, { label: "P2", value: 0 }];
+  const rows = [];
+  const cursor = new Date(`${start}T00:00:00Z`);
+  const endDate = new Date(`${end}T00:00:00Z`);
+  while (cursor <= endDate && rows.length < 120) {
+    rows.push({ label: cursor.toISOString().slice(0, 10), value: 0 });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return rows.length ? rows : [{ label: start, value: 0 }, { label: end, value: 0 }];
 }
 
 function buildSeriesMap(data) {

@@ -464,6 +464,11 @@ button {
   gap: 12px;
 }
 
+.metric-side {
+  display: grid;
+  justify-items: end;
+}
+
 .metric-label {
   color: #4d5662;
   font-weight: 700;
@@ -709,6 +714,15 @@ tr:last-child td {
   margin: 22px 0;
 }
 
+.slider-row-rich {
+  grid-template-columns: 220px 1fr 170px;
+}
+
+.slider-copy {
+  display: grid;
+  gap: 4px;
+}
+
 .slider-label {
   font-weight: 700;
   color: #2b3440;
@@ -722,13 +736,21 @@ tr:last-child td {
 
 .sim-range {
   width: 100%;
-  accent-color: var(--green);
+  appearance: none;
+  -webkit-appearance: none;
   cursor: pointer;
+  background: transparent;
 }
 
 .sim-range::-webkit-slider-runnable-track {
   height: 8px;
-  background: #d8dde3;
+  background: linear-gradient(
+    90deg,
+    var(--green) 0,
+    var(--green) var(--fill, 0%),
+    #d8dde3 var(--fill, 0%),
+    #d8dde3 100%
+  );
   border-radius: 999px;
 }
 
@@ -750,6 +772,12 @@ tr:last-child td {
   border-radius: 999px;
 }
 
+.sim-range::-moz-range-progress {
+  height: 8px;
+  background: var(--green);
+  border-radius: 999px;
+}
+
 .sim-range::-moz-range-thumb {
   width: 16px;
   height: 16px;
@@ -766,6 +794,11 @@ tr:last-child td {
   justify-content: center;
 }
 
+.simulator-reset {
+  width: 100%;
+  min-height: 42px;
+}
+
 .simulator-gap {
   display: flex;
   justify-content: space-between;
@@ -778,6 +811,7 @@ tr:last-child td {
 .mock-card {
   background: linear-gradient(#ffe28a, #fff1c4 34%, #fff7dd);
   border: 2px solid var(--yellow-line);
+  box-shadow: 0 8px 20px rgba(245, 158, 11, 0.18);
 }
 
 .mock-card .mock-head {
@@ -816,6 +850,16 @@ tr:last-child td {
   height: 6px;
   border-radius: 999px;
   background: currentColor;
+}
+
+.mock-empty {
+  border: 2px solid #f5b000;
+  background: linear-gradient(180deg, #fff9e8 0%, #fffdf5 100%);
+}
+
+.metric-compare-label {
+  margin-top: 4px;
+  text-align: right;
 }
 
 .funnel-row {

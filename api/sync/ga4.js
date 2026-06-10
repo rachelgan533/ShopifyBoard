@@ -74,6 +74,12 @@ async function testGa4Connection() {
     status: "connected",
     last_tested_at: new Date().toISOString(),
     last_connected_at: new Date().toISOString(),
+    config: {
+      property_id: propertyId,
+      google_account_email: serviceAccount.client_email,
+      google_project_id: serviceAccount.project_id || "",
+      lookback_days: String(Math.max(1, Number(config.lookback_days || DEFAULT_LOOKBACK_DAYS))),
+    },
   });
 
   return {
@@ -158,6 +164,12 @@ async function syncGa4() {
     last_tested_at: syncedAt,
     last_connected_at: syncedAt,
     last_synced_at: syncedAt,
+    config: {
+      property_id: propertyId,
+      google_account_email: serviceAccount.client_email,
+      google_project_id: serviceAccount.project_id || "",
+      lookback_days: String(lookbackDays),
+    },
   });
 
   await upsertSyncState(shopId, {
@@ -377,11 +389,15 @@ function cleanSegmentName(value) {
 
 async function touchIntegration(source, patch) {
   const current = await getIntegration(source);
+  const mergedConfig = {
+    ...(current?.config || {}),
+    ...(patch.config || {}),
+  };
   const row = {
     ...(current || {}),
     source,
     status: patch.status || current?.status || "connected",
-    config: current?.config || {},
+    config: mergedConfig,
     last_connected_at: patch.last_connected_at ?? current?.last_connected_at ?? null,
     last_tested_at: patch.last_tested_at ?? current?.last_tested_at ?? null,
     last_synced_at: patch.last_synced_at ?? current?.last_synced_at ?? null,

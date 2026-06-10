@@ -19,12 +19,13 @@ module.exports = async function handler(req, res) {
       previousAdRows,
       goalRows,
       syncRows,
+      audienceRows,
     ] = await Promise.all([
       supabaseFetch(
-        `/rest/v1/orders?select=id,customer_id,total_price,subtotal_price,total_refunded,created_at,source_name,customer_country,discount_codes&created_at=gte.${encodeURIComponent(range.startIso)}&created_at=lte.${encodeURIComponent(range.endIso)}&limit=20000`,
+        `/rest/v1/orders?select=id,customer_id,total_price,subtotal_price,total_refunded,created_at,source_name,customer_country,customer_province,customer_city,discount_codes&created_at=gte.${encodeURIComponent(range.startIso)}&created_at=lte.${encodeURIComponent(range.endIso)}&limit=20000`,
       ),
       supabaseFetch(
-        `/rest/v1/orders?select=id,customer_id,total_price,subtotal_price,total_refunded,created_at,source_name,customer_country,discount_codes&created_at=gte.${encodeURIComponent(previousRange.startIso)}&created_at=lte.${encodeURIComponent(previousRange.endIso)}&limit=20000`,
+        `/rest/v1/orders?select=id,customer_id,total_price,subtotal_price,total_refunded,created_at,source_name,customer_country,customer_province,customer_city,discount_codes&created_at=gte.${encodeURIComponent(previousRange.startIso)}&created_at=lte.${encodeURIComponent(previousRange.endIso)}&limit=20000`,
       ),
       supabaseFetch("/rest/v1/order_line_items?select=order_id,title,sku,quantity,price&limit=30000"),
       supabaseFetch("/rest/v1/coupon_codes?select=code,category&limit=10000"),
@@ -45,6 +46,9 @@ module.exports = async function handler(req, res) {
       ),
       supabaseFetch(
         "/rest/v1/sync_state?select=source,last_synced_at,status,updated_at&source=in.(shopify,ga4,google_ads,meta_ads)&limit=20",
+      ),
+      supabaseFetch(
+        "/rest/v1/audience_segments?select=source,segment_type,segment_name,users,percentage,affinity,day&order=day.desc&limit=5000",
       ),
     ]);
 
@@ -69,6 +73,8 @@ module.exports = async function handler(req, res) {
     const adDaily = buildAdDaily(adRows);
     const sync = buildSyncSummary(syncRows);
     const activeGoal = await buildActiveGoal(goalRows[0], range, summary, ga4Funnel);
+    const audience = buildAudienceOverview(audienceRows);
+    const shopifyPersona = buildShopifyPersona(orderRows, customerQuality.summary, summary, customerSegments);
 
     return res.status(200).json({
       ok: true,
@@ -86,6 +92,8 @@ module.exports = async function handler(req, res) {
       ga4_daily: ga4Daily,
       ad_performance: adPerformance,
       ad_daily: adDaily,
+      audience,
+      shopify_persona: shopifyPersona,
       previous: {
         range: previousRange,
         summary: previousSummary,
@@ -136,6 +144,129 @@ function readDateRange(query) {
     startIso: `${start}T00:00:00.000Z`,
     endIso: `${end}T23:59:59.999Z`,
   };
+}
+
+function buildAudienceOverview(rows) {
+  const bySource = groupLatestAudienceBySource(rows);
+  const overviewRows = ["ga4", "google_ads", "meta_ads"].flatMap((source) => bySource[source]?.rows || []);
+
+  return {
+    overview: buildAudienceSnapshot(overviewRows),
+    sources: {
+      ga4: buildAudienceSnapshot(bySource.ga4?.rows || []),
+      google_ads: buildAudienceSnapshot(bySource.google_ads?.rows || []),
+      meta_ads: buildAudienceSnapshot(bySource.meta_ads?.rows || []),
+    },
+  };
+}
+
+function groupLatestAudienceBySource(rows) {
+  const latestBySource = {};
+  rows.forEach((row) => {
+    const source = row.source || "unknown";
+    if (!latestBySource[source] || String(row.day || "") > latestBySource[source]) {
+      latestBySource[source] = String(row.day || "");
+    }
+  });
+
+  const grouped = {};
+  rows.forEach((row) => {
+    const source = row.source || "unknown";
+    if (String(row.day || "") !== latestBySource[source]) return;
+    if (!grouped[source]) grouped[source] = { latest_day: latestBySource[source], rows: [] };
+    grouped[source].rows.push(row);
+  });
+  return grouped;
+}
+
+function buildAudienceSnapshot(rows) {
+  if (!rows.length) {
+    return {
+      latest_day: null,
+      gender: [],
+      age: [],
+      interest: [],
+      language: [],
+      country: [],
+      city: [],
+      device: [],
+    };
+  }
+
+  const byType = rows.reduce((acc, row) => {
+    const type = row.segment_type || "other";
+    if (!acc[type]) acc[type] = [];
+    acc[type].push(row);
+    return acc;
+  }, {});
+
+  return {
+    latest_day: rows[0]?.day || null,
+    gender: normalizeAudienceType(byType.gender || []),
+    age: normalizeAudienceType(byType.age || []),
+    interest: normalizeAudienceType(byType.interest || [], true),
+    language: normalizeAudienceType(byType.language || []),
+    country: normalizeAudienceType(byType.country || []),
+    city: normalizeAudienceType(byType.city || []),
+    device: normalizeAudienceType(byType.device || []),
+  };
+}
+
+function normalizeAudienceType(rows, useAffinity = false) {
+  const total = rows.reduce((sum, row) => sum + number(row.users), 0) || 1;
+  return rows
+    .map((row) => ({
+      name: row.segment_name,
+      users: number(row.users),
+      percentage: round(row.percentage ? number(row.percentage) : (number(row.users) / total) * 100),
+      affinity: useAffinity ? round(row.affinity || row.users) : null,
+    }))
+    .sort((a, b) => b.users - a.users);
+}
+
+function buildShopifyPersona(rows, customerSummary, orderSummary, customerSegments) {
+  return {
+    country: buildLocationDistribution(rows, "customer_country"),
+    province: buildLocationDistribution(rows, "customer_province"),
+    city: buildLocationDistribution(rows, "customer_city"),
+    new_vs_returning: [
+      { name: "New Customers", value: Math.max(number(customerSummary.new_customers), 0) },
+      { name: "Returning Customers", value: Math.max(number(customerSummary.returning_customers), 0) },
+    ],
+    value_segments: customerSegments.map((segment) => ({
+      name: segment.segment,
+      customers: segment.customers,
+      revenue: segment.revenue,
+      aov: segment.avg_customer_value,
+    })),
+    metrics: {
+      aov: number(orderSummary.aov),
+      ltv: number(customerSummary.avg_customer_value),
+      repeat_rate: number(customerSummary.repeat_rate),
+      orders: number(orderSummary.orders),
+    },
+  };
+}
+
+function buildLocationDistribution(rows, field) {
+  const grouped = new Map();
+  const allCustomers = new Set();
+  rows.forEach((row) => {
+    const value = String(row[field] || "").trim();
+    if (!value || !row.customer_id) return;
+    allCustomers.add(row.customer_id);
+    if (!grouped.has(value)) grouped.set(value, new Set());
+    grouped.get(value).add(row.customer_id);
+  });
+  const total = allCustomers.size || 1;
+  return Array.from(grouped.entries())
+    .map(([name, ids]) => ({
+      name,
+      users: ids.size,
+      percentage: round((ids.size / total) * 100),
+    }))
+    .sort((a, b) => b.users - a.users)
+    .slice(0, 12);
 }
 
 function derivePreviousRange(range) {
