@@ -19,6 +19,7 @@ module.exports = async function handler(req, res) {
       previousAdRows,
       goalRows,
       syncRows,
+      integrationRows,
       audienceRows,
     ] = await Promise.all([
       supabaseFetch(
@@ -48,6 +49,9 @@ module.exports = async function handler(req, res) {
         "/rest/v1/sync_state?select=source,last_synced_at,status,updated_at&source=in.(shopify,ga4,google_ads,meta_ads)&limit=20",
       ),
       supabaseFetch(
+        "/rest/v1/data_integrations?select=source,status,config,last_synced_at,last_tested_at&source=in.(shopify,ga4,google_ads,meta_ads)&limit=20",
+      ),
+      supabaseFetch(
         "/rest/v1/audience_segments?select=source,segment_type,segment_name,users,percentage,affinity,day&order=day.desc&limit=5000",
       ),
     ]);
@@ -71,7 +75,7 @@ module.exports = async function handler(req, res) {
     const adPerformance = buildAdPerformance(adRows);
     const previousAdPerformance = buildAdPerformance(previousAdRows);
     const adDaily = buildAdDaily(adRows);
-    const sync = buildSyncSummary(syncRows);
+    const sync = buildSyncSummary(syncRows, integrationRows);
     const activeGoal = await buildActiveGoal(goalRows[0], range, summary, ga4Funnel);
     const audience = buildAudienceOverview(audienceRows);
     const shopifyPersona = buildShopifyPersona(orderRows, customerQuality.summary, summary, customerSegments);
@@ -733,15 +737,26 @@ function buildAdDaily(rows) {
     .sort((a, b) => a.day.localeCompare(b.day));
 }
 
-function buildSyncSummary(rows) {
+function buildSyncSummary(rows, integrationRows = []) {
   const sorted = rows
     .filter((row) => row.last_synced_at)
     .sort((a, b) => String(b.last_synced_at).localeCompare(String(a.last_synced_at)));
+
+  const integrationBySource = Object.fromEntries(
+    integrationRows.map((row) => [row.source, row]),
+  );
 
   return {
     last_synced_at: sorted[0]?.last_synced_at || null,
     status: sorted[0]?.status || "unknown",
     updated_at: sorted[0]?.updated_at || null,
+    ga4: {
+      status: integrationBySource.ga4?.status || "unknown",
+      last_synced_at: integrationBySource.ga4?.last_synced_at || null,
+      skipped_segments: Array.isArray(integrationBySource.ga4?.config?.skipped_segments)
+        ? integrationBySource.ga4.config.skipped_segments
+        : [],
+    },
   };
 }
 

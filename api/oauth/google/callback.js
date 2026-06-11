@@ -99,7 +99,12 @@ module.exports = async function handler(req, res) {
     return redirect(res, buildRedirectUrl(getBaseUrl(req), {
       oauth_status: "error",
       oauth_source: "ga4",
-      oauth_message: error.details?.error_description || error.message || "GA4 Google 授权失败",
+      oauth_message:
+        error.details?.error?.message ||
+        error.details?.message ||
+        error.details?.error_description ||
+        error.message ||
+        "GA4 Google 授权失败",
     }));
   }
 };

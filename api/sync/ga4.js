@@ -173,6 +173,7 @@ async function syncGa4() {
       google_project_id: authContext.projectId || config.google_project_id || "",
       google_auth_mode: authContext.mode === "oauth" ? "Google OAuth" : "Service Account",
       lookback_days: String(lookbackDays),
+      skipped_segments: skippedSegments,
     },
   });
 

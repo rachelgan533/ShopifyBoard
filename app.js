@@ -792,16 +792,16 @@ function personasShopifyPage() {
   `;
 }
 
-function personaEmptyState(message) {
-  return `<div class="card pad mock-empty"><div class="mock-head"><span>REAL DATA MISSING</span><span>等待同步</span></div><div class="muted" style="margin-top:12px">${message}</div></div>`;
+function personaEmptyState(message, hint = "") {
+  return `<div class="card pad mock-empty"><div class="mock-head"><span>等待受众数据</span><span>GA4 / Ads</span></div><div class="muted" style="margin-top:12px">${message}</div>${hint ? `<div class="muted" style="margin-top:8px;color:#9a6b00">${hint}</div>` : ""}</div>`;
 }
 
-function renderPersonaOverviewSections(audience, shopifyPersona) {
+function renderPersonaOverviewSections(audience, shopifyPersona, sync) {
   return `
     ${section("人群属性", "综合各渠道汇总的人群性别与年龄结构", `${pill("GA4")} ${pill("Google Ads", "red")} ${pill("Meta Ads", "red")} ${pill("Shopify")}`, `
       <div class="grid cols-2">
-        ${renderAudienceDonut("性别分布", audience.gender)}
-        ${renderAudienceBar("年龄分布", audience.age)}
+        ${renderAudienceDonut("性别分布", audience.gender, undefined, getAudienceMissingHint("gender", sync))}
+        ${renderAudienceBar("年龄分布", audience.age, getAudienceMissingHint("age", sync))}
       </div>
     `)}
     ${section("地区与设备", "跨渠道地区与设备分布", "", `
@@ -815,7 +815,7 @@ function renderPersonaOverviewSections(audience, shopifyPersona) {
   `;
 }
 
-function renderPersonaSourceSections(source, snapshot) {
+function renderPersonaSourceSections(source, snapshot, sync) {
   if (!snapshot || !hasAudienceData(snapshot)) {
     return `${section(`${source} ${source === "GA4" ? pill("GA4") : pill(source, "red")}`, "当前还没有可用的真实受众快照", "", personaEmptyState("先在集成设置里完成连接并手动同步，受众数据进 Supabase 后这里会自动替换。"))}`;
   }
@@ -823,8 +823,8 @@ function renderPersonaSourceSections(source, snapshot) {
   return `
     ${section(`${source} ${source === "GA4" ? pill("GA4") : pill(source, "red")}`, `最新快照日期：${snapshot.latest_day || "—"}`, "", `
       <div class="grid cols-2">
-        ${renderAudienceDonut("性别分布", snapshot.gender)}
-        ${renderAudienceBar("年龄分布", snapshot.age)}
+        ${renderAudienceDonut("性别分布", snapshot.gender, undefined, getAudienceMissingHint("gender", sync))}
+        ${renderAudienceBar("年龄分布", snapshot.age, getAudienceMissingHint("age", sync))}
       </div>
     `)}
     ${section("兴趣标签", "", "", renderInterestTable(snapshot.interest))}
@@ -863,13 +863,13 @@ function renderShopifyPersonaSections(persona) {
   `;
 }
 
-function renderAudienceDonut(title, rows, colors) {
-  if (!rows?.length) return personaEmptyState(`${title} 暂无真实数据`);
+function renderAudienceDonut(title, rows, colors, hint = "") {
+  if (!rows?.length) return personaEmptyState(`${title} 暂无真实数据`, hint);
   return donutCard(title, rows.slice(0, 8).map((row) => [row.name, Number(row.percentage || row.value || 0)]), colors);
 }
 
-function renderAudienceBar(title, rows) {
-  if (!rows?.length) return personaEmptyState(`${title} 暂无真实数据`);
+function renderAudienceBar(title, rows, hint = "") {
+  if (!rows?.length) return personaEmptyState(`${title} 暂无真实数据`, hint);
   return barChartCard(title, rows.slice(0, 8).map((row) => [row.name, Number(row.users || row.value || 0)]));
 }
 
@@ -891,6 +891,16 @@ function renderShopifyValueTable(rows) {
 
 function hasAudienceData(snapshot) {
   return ["gender", "age", "interest", "language", "country", "city", "device"].some((key) => Array.isArray(snapshot?.[key]) && snapshot[key].length);
+}
+
+function getAudienceMissingHint(segmentType, sync) {
+  const skipped = sync?.ga4?.skipped_segments || [];
+  const matched = skipped.find((item) => item.segment_type === segmentType);
+  if (!matched) return "";
+  if (segmentType === "gender" || segmentType === "age") {
+    return "GA4 当前未返回该人口属性维度。请检查 Google Signals、人口统计设置，或等待数据量达到展示阈值。";
+  }
+  return `GA4 同步时跳过了 ${segmentType} 维度。`;
 }
 
 function operationsPage() {
@@ -2224,22 +2234,23 @@ function applyDashboardData(data) {
     personaOverview.innerHTML = renderPersonaOverviewSections(
       data.audience?.overview || {},
       data.shopify_persona || {},
+      data.sync || {},
     );
   }
 
   const personaGa4 = document.querySelector('[data-persona-source="ga4"]');
   if (personaGa4) {
-    personaGa4.innerHTML = renderPersonaSourceSections("GA4", data.audience?.sources?.ga4 || {});
+    personaGa4.innerHTML = renderPersonaSourceSections("GA4", data.audience?.sources?.ga4 || {}, data.sync || {});
   }
 
   const personaGoogleAds = document.querySelector('[data-persona-source="google_ads"]');
   if (personaGoogleAds) {
-    personaGoogleAds.innerHTML = renderPersonaSourceSections("Google Ads", data.audience?.sources?.google_ads || {});
+    personaGoogleAds.innerHTML = renderPersonaSourceSections("Google Ads", data.audience?.sources?.google_ads || {}, data.sync || {});
   }
 
   const personaMetaAds = document.querySelector('[data-persona-source="meta_ads"]');
   if (personaMetaAds) {
-    personaMetaAds.innerHTML = renderPersonaSourceSections("Meta Ads", data.audience?.sources?.meta_ads || {});
+    personaMetaAds.innerHTML = renderPersonaSourceSections("Meta Ads", data.audience?.sources?.meta_ads || {}, data.sync || {});
   }
 
   const personaShopify = document.querySelector("[data-persona-shopify]");
