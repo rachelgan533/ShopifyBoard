@@ -60,8 +60,8 @@ function assertEnv() {
 async function testGa4Connection() {
   const config = await getIntegrationConfig("ga4");
   const propertyId = normalizePropertyId(config.property_id || process.env.GA4_PROPERTY_ID);
-  const serviceAccount = parseServiceAccount(config.service_account_json || process.env.GA4_SERVICE_ACCOUNT_JSON);
-  const accessToken = await getGoogleAccessToken(serviceAccount);
+  const authContext = resolveGa4AuthContext(config);
+  const accessToken = await getGoogleAccessToken(authContext);
 
   const report = await runGa4Report(propertyId, accessToken, {
     dateRanges: [{ startDate: "7daysAgo", endDate: "today" }],
@@ -75,9 +75,11 @@ async function testGa4Connection() {
     last_tested_at: new Date().toISOString(),
     last_connected_at: new Date().toISOString(),
     config: {
+      auth_mode: authContext.mode,
       property_id: propertyId,
-      google_account_email: serviceAccount.client_email,
-      google_project_id: serviceAccount.project_id || "",
+      google_account_email: authContext.accountEmail || config.google_account_email || "",
+      google_project_id: authContext.projectId || config.google_project_id || "",
+      google_auth_mode: authContext.mode === "oauth" ? "Google OAuth" : "Service Account",
       lookback_days: String(Math.max(1, Number(config.lookback_days || DEFAULT_LOOKBACK_DAYS))),
     },
   });
@@ -85,7 +87,7 @@ async function testGa4Connection() {
   return {
     ok: true,
     property_id: propertyId,
-    service_account: serviceAccount.client_email,
+    service_account: authContext.accountEmail || "OAuth",
     sample_rows: report.rows?.length || 0,
   };
 }
@@ -93,8 +95,8 @@ async function testGa4Connection() {
 async function syncGa4() {
   const config = await getIntegrationConfig("ga4");
   const propertyId = normalizePropertyId(config.property_id || process.env.GA4_PROPERTY_ID);
-  const serviceAccount = parseServiceAccount(config.service_account_json || process.env.GA4_SERVICE_ACCOUNT_JSON);
-  const accessToken = await getGoogleAccessToken(serviceAccount);
+  const authContext = resolveGa4AuthContext(config);
+  const accessToken = await getGoogleAccessToken(authContext);
   const shopId = await resolveShopId(config);
   const lookbackDays = Math.max(1, Number(config.lookback_days || DEFAULT_LOOKBACK_DAYS));
   const startDate = `${lookbackDays - 1}daysAgo`;
@@ -165,9 +167,11 @@ async function syncGa4() {
     last_connected_at: syncedAt,
     last_synced_at: syncedAt,
     config: {
+      auth_mode: authContext.mode,
       property_id: propertyId,
-      google_account_email: serviceAccount.client_email,
-      google_project_id: serviceAccount.project_id || "",
+      google_account_email: authContext.accountEmail || config.google_account_email || "",
+      google_project_id: authContext.projectId || config.google_project_id || "",
+      google_auth_mode: authContext.mode === "oauth" ? "Google OAuth" : "Service Account",
       lookback_days: String(lookbackDays),
     },
   });
@@ -253,6 +257,45 @@ function parseServiceAccount(raw) {
   return parsed;
 }
 
+function resolveGa4AuthContext(config) {
+  const refreshToken = String(config.refresh_token || process.env.GA4_REFRESH_TOKEN || "").trim();
+  const authMode = String(config.auth_mode || "").trim().toLowerCase();
+  if (refreshToken || authMode === "oauth") {
+    const clientId = String(process.env.GOOGLE_OAUTH_CLIENT_ID || "").trim();
+    const clientSecret = String(process.env.GOOGLE_OAUTH_CLIENT_SECRET || "").trim();
+    if (!clientId || !clientSecret) {
+      const error = new Error("Missing Google OAuth client configuration");
+      error.details = {
+        fix: "请在 Vercel 环境变量中设置 GOOGLE_OAUTH_CLIENT_ID 和 GOOGLE_OAUTH_CLIENT_SECRET。",
+      };
+      throw error;
+    }
+    if (!refreshToken) {
+      const error = new Error("GA4 尚未完成 Google OAuth 授权");
+      error.details = {
+        fix: "请先在集成设置的 GA4 卡片中点击“连接 Google”，完成授权后再测试或同步。",
+      };
+      throw error;
+    }
+    return {
+      mode: "oauth",
+      refreshToken,
+      clientId,
+      clientSecret,
+      accountEmail: String(config.google_account_email || "").trim(),
+      projectId: String(config.google_project_id || "").trim(),
+    };
+  }
+
+  const serviceAccount = parseServiceAccount(config.service_account_json || process.env.GA4_SERVICE_ACCOUNT_JSON);
+  return {
+    mode: "service_account",
+    serviceAccount,
+    accountEmail: serviceAccount.client_email,
+    projectId: serviceAccount.project_id || "",
+  };
+}
+
 function normalizePropertyId(value) {
   const propertyId = String(value || "").trim();
   if (!propertyId) {
@@ -263,7 +306,11 @@ function normalizePropertyId(value) {
   return propertyId;
 }
 
-async function getGoogleAccessToken(serviceAccount) {
+async function getGoogleAccessToken(authContext) {
+  if (authContext.mode === "oauth") {
+    return getGoogleAccessTokenFromRefreshToken(authContext);
+  }
+  const serviceAccount = authContext.serviceAccount;
   const now = Math.floor(Date.now() / 1000);
   const assertion = signJwt(
     { alg: "RS256", typ: "JWT" },
@@ -289,6 +336,28 @@ async function getGoogleAccessToken(serviceAccount) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok || !body.access_token) {
     const error = new Error("Failed to get Google access token");
+    error.details = body;
+    throw error;
+  }
+
+  return body.access_token;
+}
+
+async function getGoogleAccessTokenFromRefreshToken(authContext) {
+  const response = await fetch(GOOGLE_TOKEN_URL, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: authContext.clientId,
+      client_secret: authContext.clientSecret,
+      refresh_token: authContext.refreshToken,
+      grant_type: "refresh_token",
+    }).toString(),
+  });
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.access_token) {
+    const error = new Error("Failed to refresh Google OAuth access token");
     error.details = body;
     throw error;
   }

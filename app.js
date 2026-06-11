@@ -1224,12 +1224,11 @@ function integrationPage() {
       source: "ga4",
       icon: "G",
       title: "Google Analytics 4",
-      subtitle: "GA4 · Service Account",
+      subtitle: "GA4 · Google OAuth",
       status: "未连接",
       fields: [
         ["property_id", "Property ID · GA4 属性 ID", ""],
         ["lookback_days", "回溯天数 · 每次同步最近多少天", "30"],
-        ["service_account_json", "Service Account JSON · 粘贴完整 JSON（仅服务端保存）", "", "textarea"],
       ],
     },
     {
@@ -1293,8 +1292,8 @@ function integrationPage() {
                   <div class="metric-label" data-integration-field="${source === "ga4" ? "account_identity" : "last_connected_at"}">${source === "ga4" ? "未绑定" : "—"}</div>
                 </div>
                 <div class="card pad">
-                  <div class="muted">${source === "ga4" ? "Google Project · 项目标识" : "Last Tested · 最近测试"}</div>
-                  <div class="metric-label" data-integration-field="${source === "ga4" ? "project_identity" : "last_tested_at"}">${source === "ga4" ? "—" : "—"}</div>
+                  <div class="muted">${source === "ga4" ? "Auth Mode · 授权方式" : "Last Tested · 最近测试"}</div>
+                  <div class="metric-label" data-integration-field="${source === "ga4" ? "project_identity" : "last_tested_at"}">${source === "ga4" ? "Google OAuth" : "—"}</div>
                 </div>
                 <div class="card pad">
                   <div class="muted">Last Sync Time · 最近同步</div>
@@ -1318,6 +1317,7 @@ function integrationPage() {
               <div class="button-row">
                 <button class="ghost-btn" data-action="disconnect-source">断开连接</button>
                 <button class="ghost-btn" data-action="save-source" data-source="${source}">保存配置</button>
+                ${source === "ga4" ? `<button class="ghost-btn" data-action="connect-google" data-source="${source}">连接 Google</button>` : ""}
                 <button class="ghost-btn" data-action="test-source" data-source="${source}">测试连接</button>
                 <button class="primary-btn" data-action="manual-sync" data-source="${source}">手动同步</button>
               </div>
@@ -1416,6 +1416,22 @@ function render() {
   if (page === "coupons") loadCoupons();
   hydrateDashboardData();
   initializeSparklineTooltips();
+  if (page === "integration") consumeOauthFeedback();
+}
+
+function consumeOauthFeedback() {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get("oauth_status");
+  const source = params.get("oauth_source");
+  if (!status || source !== "ga4") return;
+
+  const message = params.get("oauth_message");
+  showToast(
+    status === "connected"
+      ? message || "GA4 已完成 Google 授权。"
+      : `GA4 Google 授权失败：${message || "请重试"}`,
+  );
+  history.replaceState({}, "", window.location.pathname);
 }
 
 app.addEventListener("click", (event) => {
@@ -1550,6 +1566,11 @@ async function handleAction(action, button) {
     await saveIntegration(button);
     if (button?.dataset.source === "shopify") await runShopifySync("test");
     if (button?.dataset.source === "ga4") await runGa4Sync("test");
+    return;
+  }
+
+  if (action === "connect-google") {
+    await startGoogleOAuth(button);
     return;
   }
 
@@ -1785,14 +1806,20 @@ async function saveIntegration(button) {
         "content-type": "application/json",
         authorization: `Bearer ${state.integrationSecret}`,
       },
-      body: JSON.stringify({ source, config, status: source === "ga4" ? "configured" : "connected" }),
+      body: JSON.stringify({
+        source,
+        config: source === "ga4" ? { ...config, auth_mode: "oauth" } : config,
+        status: source === "ga4" ? "configured" : "connected",
+      }),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) throw new Error(data.error || "保存失败");
     showToast(`${sourceLabel(source)} 配置已保存到 Supabase。`);
     loadIntegrationConfigs();
+    return true;
   } catch (error) {
     showToast(`保存失败：${error.message}`);
+    return false;
   }
 }
 
@@ -1809,7 +1836,15 @@ async function disconnectSource(button) {
         "content-type": "application/json",
         authorization: `Bearer ${state.integrationSecret}`,
       },
-      body: JSON.stringify({ source, status: "disconnected", config: {} }),
+      body: JSON.stringify({
+        source,
+        status: "disconnected",
+        config: {},
+        clear_keys:
+          source === "ga4"
+            ? ["refresh_token", "google_account_email", "google_project_id", "google_auth_mode", "service_account_json", "auth_mode"]
+            : [],
+      }),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) throw new Error(data.error || "断开失败");
@@ -1817,6 +1852,29 @@ async function disconnectSource(button) {
     loadIntegrationConfigs();
   } catch (error) {
     showToast(`断开失败：${error.message}`);
+  }
+}
+
+async function startGoogleOAuth(button) {
+  if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
+  const saved = await saveIntegration(button);
+  if (!saved) return;
+
+  showToast("正在跳转到 Google 授权页...");
+  try {
+    const response = await fetch("/api/oauth/google/start", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${state.integrationSecret}`,
+      },
+      body: JSON.stringify({ source: "ga4" }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok || !data.auth_url) throw new Error(data.error || "无法发起 Google 授权");
+    window.location.href = data.auth_url;
+  } catch (error) {
+    showToast(`Google 授权启动失败：${error.message}`);
   }
 }
 
@@ -1925,7 +1983,7 @@ async function loadIntegrationConfigs() {
         updateIntegrationField(
           card,
           "project_identity",
-          item.config?.google_project_id || "—",
+          item.config?.google_auth_mode || item.config?.google_project_id || "Google OAuth",
         );
       }
       if (item.source === "shopify") {

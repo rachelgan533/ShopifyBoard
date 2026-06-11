@@ -25,7 +25,10 @@ module.exports = async function handler(req, res) {
 
       const current = await getIntegration(source);
       const currentConfig = current?.config || {};
-      const nextConfig = normalizeSourceConfig(source, mergeConfig(currentConfig, body.config || {}));
+      const nextConfig = normalizeSourceConfig(
+        source,
+        mergeConfig(currentConfig, body.config || {}, body.clear_keys || []),
+      );
       const shopId = source === "shopify" ? await upsertPrimaryShop(nextConfig) : current?.shop_id || null;
       const row = {
         ...(shopId ? { shop_id: shopId } : {}),
@@ -119,8 +122,11 @@ async function upsertPrimaryShop(config) {
   return rows[0]?.id || null;
 }
 
-function mergeConfig(current, incoming) {
+function mergeConfig(current, incoming, clearKeys = []) {
   const next = { ...current };
+  for (const key of clearKeys) {
+    delete next[key];
+  }
   for (const [key, value] of Object.entries(incoming)) {
     if (value === undefined || value === null) continue;
     const text = String(value).trim();
@@ -137,6 +143,13 @@ function normalizeSourceConfig(source, config) {
   if (propertyId) next.property_id = propertyId.replace(/^properties\//, "");
   const lookbackDays = Number(next.lookback_days || next.sync_interval || 30);
   next.lookback_days = String(Math.max(1, lookbackDays));
+
+  const authMode = String(next.auth_mode || "").trim().toLowerCase();
+  if (authMode === "oauth") {
+    next.google_auth_mode = "Google OAuth";
+    delete next.service_account_json;
+    return next;
+  }
 
   const jsonText = String(next.service_account_json || "").trim();
   if (jsonText && !jsonText.includes("已保存")) {
