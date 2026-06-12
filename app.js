@@ -1572,8 +1572,10 @@ function integrationPage() {
       subtitle: "Google Ads · OAuth",
       status: "未连接",
       fields: [
-        ["oauth_client_id", "Google OAuth Client ID", ""],
         ["customer_id", "Customer ID · 广告账号 ID", ""],
+        ["login_customer_id", "Login Customer ID · MCC 经理账号（可选）", ""],
+        ["developer_token", "Developer Token · 仅服务端保存", ""],
+        ["lookback_days", "回溯天数 · 每次同步最近多少天", "30"],
         ["sync_interval", "同步频率", "每 1 小时"],
       ],
     },
@@ -1622,12 +1624,12 @@ function integrationPage() {
                   <div class="metric-label" data-integration-field="status_text">未连接</div>
                 </div>
                 <div class="card pad">
-                  <div class="muted">${source === "ga4" ? "Google Account · 授权 Google 账号" : "Last Connected · 最近连接"}</div>
-                  <div class="metric-label" data-integration-field="${source === "ga4" ? "account_identity" : "last_connected_at"}">${source === "ga4" ? "未绑定" : "—"}</div>
+                  <div class="muted">${["ga4", "google_ads"].includes(source) ? "Google Account · 授权 Google 账号" : "Last Connected · 最近连接"}</div>
+                  <div class="metric-label" data-integration-field="${["ga4", "google_ads"].includes(source) ? "account_identity" : "last_connected_at"}">${["ga4", "google_ads"].includes(source) ? "未绑定" : "—"}</div>
                 </div>
                 <div class="card pad">
-                  <div class="muted">${source === "ga4" ? "Auth Mode · 授权方式" : "Last Tested · 最近测试"}</div>
-                  <div class="metric-label" data-integration-field="${source === "ga4" ? "project_identity" : "last_tested_at"}">${source === "ga4" ? "Google OAuth" : "—"}</div>
+                  <div class="muted">${["ga4", "google_ads"].includes(source) ? "Auth Mode · 授权方式" : "Last Tested · 最近测试"}</div>
+                  <div class="metric-label" data-integration-field="${["ga4", "google_ads"].includes(source) ? "project_identity" : "last_tested_at"}">${["ga4", "google_ads"].includes(source) ? "Google OAuth" : "—"}</div>
                 </div>
                 <div class="card pad">
                   <div class="muted">Last Sync Time · 最近同步</div>
@@ -1651,7 +1653,7 @@ function integrationPage() {
               <div class="button-row">
                 <button class="ghost-btn" data-action="disconnect-source">断开连接</button>
                 <button class="ghost-btn" data-action="save-source" data-source="${source}">保存配置</button>
-                ${source === "ga4" ? `<button class="ghost-btn" data-action="connect-google" data-source="${source}">连接 Google</button>` : ""}
+                ${["ga4", "google_ads"].includes(source) ? `<button class="ghost-btn" data-action="connect-google" data-source="${source}">连接 Google</button>` : ""}
                 <button class="ghost-btn" data-action="test-source" data-source="${source}">测试连接</button>
                 <button class="primary-btn" data-action="manual-sync" data-source="${source}">手动同步</button>
               </div>
@@ -1760,15 +1762,16 @@ function consumeOauthFeedback() {
   const params = new URLSearchParams(window.location.search);
   const status = params.get("oauth_status");
   const source = params.get("oauth_source");
-  if (!status || source !== "ga4") return;
+  if (!status || !["ga4", "google_ads"].includes(source)) return;
 
   const message = params.get("oauth_message");
   showToast(
     status === "connected"
-      ? message || "GA4 已完成 Google 授权。"
-      : `GA4 Google 授权失败：${message || "请重试"}`,
+      ? message || `${source === "google_ads" ? "Google Ads" : "GA4"} 已完成 Google 授权。`
+      : `${source === "google_ads" ? "Google Ads" : "GA4"} Google 授权失败：${message || "请重试"}`,
   );
   history.replaceState({}, "", window.location.pathname);
+  loadIntegrationConfigs();
 }
 
 app.addEventListener("click", (event) => {
@@ -1903,6 +1906,7 @@ async function handleAction(action, button) {
     await saveIntegration(button);
     if (button?.dataset.source === "shopify") await runShopifySync("test");
     if (button?.dataset.source === "ga4") await runGa4Sync("test");
+    if (button?.dataset.source === "google_ads") await runGoogleAdsSync("test");
     return;
   }
 
@@ -1916,8 +1920,10 @@ async function handleAction(action, button) {
       await runShopifySync();
     } else if (button?.dataset.source === "ga4") {
       await runGa4Sync();
+    } else if (button?.dataset.source === "google_ads") {
+      await runGoogleAdsSync();
     } else {
-      showToast("这个数据源的同步接口还没接入，当前先接通 Shopify 和 GA4。");
+      showToast("这个数据源的同步接口还没接入，当前先接通 Shopify、GA4 和 Google Ads。");
     }
     return;
   }
@@ -2145,8 +2151,8 @@ async function saveIntegration(button) {
       },
       body: JSON.stringify({
         source,
-        config: source === "ga4" ? { ...config, auth_mode: "oauth" } : config,
-        status: source === "ga4" ? "configured" : "connected",
+        config: ["ga4", "google_ads"].includes(source) ? { ...config, auth_mode: "oauth" } : config,
+        status: ["ga4", "google_ads"].includes(source) ? "configured" : "connected",
       }),
     });
     const data = await response.json();
@@ -2180,7 +2186,9 @@ async function disconnectSource(button) {
         clear_keys:
           source === "ga4"
             ? ["refresh_token", "google_account_email", "google_project_id", "google_auth_mode", "service_account_json", "auth_mode"]
-            : [],
+            : source === "google_ads"
+              ? ["refresh_token", "google_account_email", "google_auth_mode", "customer_name", "auth_mode"]
+              : [],
       }),
     });
     const data = await response.json();
@@ -2196,6 +2204,7 @@ async function startGoogleOAuth(button) {
   if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
   const saved = await saveIntegration(button);
   if (!saved) return;
+  const source = String(button?.dataset.source || "ga4");
 
   showToast("正在跳转到 Google 授权页...");
   try {
@@ -2205,7 +2214,7 @@ async function startGoogleOAuth(button) {
         "content-type": "application/json",
         authorization: `Bearer ${state.integrationSecret}`,
       },
-      body: JSON.stringify({ source: "ga4" }),
+      body: JSON.stringify({ source }),
     });
     const data = await response.json();
     if (!response.ok || !data.ok || !data.auth_url) throw new Error(data.error || "无法发起 Google 授权");
@@ -2256,6 +2265,28 @@ async function runGa4Sync(mode = "sync") {
     showToast(`GA4 同步完成：日指标 ${data.synced_daily_rows}，画像分群 ${data.synced_segment_rows}`);
   } catch (error) {
     showToast(`GA4 操作失败：${error.message}`);
+  }
+}
+
+async function runGoogleAdsSync(mode = "sync") {
+  if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
+
+  showToast(mode === "test" ? "正在测试 Google Ads 连接..." : "正在同步 Google Ads 数据...");
+  try {
+    const suffix = mode === "test" ? "&mode=test" : "";
+    const response = await fetch(`/api/sync/google-ads?secret=${encodeURIComponent(state.integrationSecret)}${suffix}`);
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Google Ads 同步失败");
+    await loadIntegrationConfigs();
+    if (mode === "test") {
+      showToast(`Google Ads 连接测试通过：${data.customer_name || data.customer_id}`);
+      return;
+    }
+    state.dashboardData = null;
+    await hydrateDashboardData();
+    showToast(`Google Ads 同步完成：${data.synced_rows} 条日广告数据`);
+  } catch (error) {
+    showToast(`Google Ads 操作失败：${error.message}`);
   }
 }
 
@@ -2321,6 +2352,22 @@ async function loadIntegrationConfigs() {
           card,
           "project_identity",
           item.config?.google_auth_mode || item.config?.google_project_id || "Google OAuth",
+        );
+      }
+      if (item.source === "google_ads") {
+        updateIntegrationField(
+          card,
+          "account_identity",
+          item.config?.google_account_email
+            ? `已绑定（${item.config.google_account_email}）`
+            : item.status === "connected"
+              ? "已连接（邮箱未记录）"
+              : "未绑定",
+        );
+        updateIntegrationField(
+          card,
+          "project_identity",
+          item.config?.customer_name || item.config?.customer_id || "Google Ads 账号",
         );
       }
       if (item.source === "shopify") {

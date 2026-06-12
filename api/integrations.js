@@ -137,29 +137,43 @@ function mergeConfig(current, incoming, clearKeys = []) {
 }
 
 function normalizeSourceConfig(source, config) {
-  if (source !== "ga4") return config;
   const next = { ...config };
-  const propertyId = String(next.property_id || "").trim();
-  if (propertyId) next.property_id = propertyId.replace(/^properties\//, "");
-  const lookbackDays = Number(next.lookback_days || next.sync_interval || 30);
-  next.lookback_days = String(Math.max(1, lookbackDays));
 
-  const authMode = String(next.auth_mode || "").trim().toLowerCase();
-  if (authMode === "oauth") {
-    next.google_auth_mode = "Google OAuth";
-    delete next.service_account_json;
+  if (source === "ga4") {
+    const propertyId = String(next.property_id || "").trim();
+    if (propertyId) next.property_id = propertyId.replace(/^properties\//, "");
+    const lookbackDays = Number(next.lookback_days || next.sync_interval || 30);
+    next.lookback_days = String(Math.max(1, lookbackDays));
+
+    const authMode = String(next.auth_mode || "").trim().toLowerCase();
+    if (authMode === "oauth") {
+      next.google_auth_mode = "Google OAuth";
+      delete next.service_account_json;
+      return next;
+    }
+
+    const jsonText = String(next.service_account_json || "").trim();
+    if (jsonText && !jsonText.includes("已保存")) {
+      try {
+        const parsed = JSON.parse(jsonText);
+        if (parsed.client_email) next.google_account_email = parsed.client_email;
+        if (parsed.project_id) next.google_project_id = parsed.project_id;
+      } catch {
+        // Let sync/test surface JSON validation errors.
+      }
+    }
     return next;
   }
 
-  const jsonText = String(next.service_account_json || "").trim();
-  if (jsonText && !jsonText.includes("已保存")) {
-    try {
-      const parsed = JSON.parse(jsonText);
-      if (parsed.client_email) next.google_account_email = parsed.client_email;
-      if (parsed.project_id) next.google_project_id = parsed.project_id;
-    } catch {
-      // Let sync/test surface JSON validation errors.
+  if (source === "google_ads") {
+    next.customer_id = String(next.customer_id || "").replace(/[^\d]/g, "").trim();
+    next.login_customer_id = String(next.login_customer_id || "").replace(/[^\d]/g, "").trim();
+    const lookbackDays = Number(next.lookback_days || 30);
+    next.lookback_days = String(Math.max(1, lookbackDays));
+    if (String(next.auth_mode || "").trim().toLowerCase() === "oauth") {
+      next.google_auth_mode = "Google OAuth";
     }
+    return next;
   }
 
   return next;
