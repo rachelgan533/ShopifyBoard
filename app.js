@@ -447,18 +447,18 @@ function donutCard(title, rows, colors = ["#00896b", "#19a186", "#6375d6", "#f59
 }
 
 function barChartCard(title, rows, color = "var(--green)") {
-  const max = Math.max(...rows.map((r) => Number(r[1])));
+  const max = Math.max(...rows.map((r) => Number(r[1] || 0)), 0) || 1;
   return `
     <div class="card pad chart-card">
       <div class="chart-title">${title}</div>
       <div class="bar-chart">
         ${rows
           .map(
-            ([label, value]) => `
+            ([label, value, display]) => `
               <div class="bar-row">
                 <span class="num">${label}</span>
-                <div class="bar-track"><div class="bar-fill" style="width:${(Number(value) / max) * 100}%; background:${color}"></div></div>
-                <span class="muted">${value}</span>
+                <div class="bar-track"><div class="bar-fill" style="width:${Math.max((Number(value || 0) / max) * 100, Number(value || 0) > 0 ? 2 : 0)}%; background:${color}"></div></div>
+                <span class="muted">${display ?? value}</span>
               </div>
             `,
           )
@@ -477,9 +477,18 @@ function tableCard(title, headers, rows) {
   `;
 }
 
-function tableMarkup(headers, rows) {
+function compactTableCard(title, headers, rows) {
   return `
-    <div class="table-wrap">
+    <div class="card pad">
+      ${title ? `<div class="table-title">${title}</div>` : ""}
+      ${tableMarkup(headers, rows, { compact: true })}
+    </div>
+  `;
+}
+
+function tableMarkup(headers, rows, options = {}) {
+  return `
+    <div class="table-wrap ${options.compact ? "compact" : ""}">
       <table>
         <thead><tr>${headers.map((h, i) => `<th class="${i > 0 ? "num" : ""}">${h}</th>`).join("")}</tr></thead>
         <tbody>
@@ -804,10 +813,15 @@ function renderPersonaOverviewSections(audience, shopifyPersona, sync) {
         ${renderAudienceBar("年龄分布", audience.age, getAudienceMissingHint("age", sync))}
       </div>
     `)}
+    ${section("核心画像结论", "基于当前时间范围内的受众结构自动生成", "", renderPersonaInsights(audience, shopifyPersona))}
     ${section("地区与设备", "跨渠道地区与设备分布", "", `
       <div class="grid cols-2">
         ${renderAudienceTable("地区分布", "地区分布", audience.country)}
+        ${renderAudienceTable("城市分布", "地区分布", audience.city)}
+      </div>
+      <div class="grid cols-2">
         ${renderAudienceDonut("访问设备明细", audience.device, ["#00896b", "#19a186", "#64c3a8", "#8e98aa"])}
+        ${renderAudienceDonut("语言分布", audience.language, ["#00896b", "#19a186", "#6375d6", "#f59e0b", "#8e98aa"])}
       </div>
     `)}
     ${section("兴趣标签", "", "", renderInterestTable(audience.interest))}
@@ -827,6 +841,7 @@ function renderPersonaSourceSections(source, snapshot, sync) {
         ${renderAudienceBar("年龄分布", snapshot.age, getAudienceMissingHint("age", sync))}
       </div>
     `)}
+    ${section("核心画像结论", "", "", renderPersonaInsights(snapshot))}
     ${section("兴趣标签", "", "", renderInterestTable(snapshot.interest))}
     <div class="grid cols-2">
       ${renderAudienceDonut("Language", snapshot.language, ["#00896b", "#19a186", "#6375d6", "#f59e0b", "#8e98aa"])}
@@ -863,6 +878,320 @@ function renderShopifyPersonaSections(persona) {
   `;
 }
 
+function renderOperationsDashboard(data, cardDelta) {
+  const summary = data.summary || {};
+  const ga4 = data.ga4_funnel || {};
+  const previous = data.previous || {};
+  const previousSummary = previous.summary || {};
+  const previousGa4 = previous.ga4_funnel || {};
+  const daily = data.daily_sales || [];
+  const orderMix = data.order_mix || [
+    { name: "普通", orders: summary.orders || 0, percentage: 100 },
+    { name: "B2B", orders: 0, percentage: 0 },
+  ];
+  const deviceRows = (data.audience?.sources?.ga4?.device || data.audience?.overview?.device || []).map((row) => [
+    row.name,
+    Number(row.percentage || 0),
+  ]);
+  const topCustomerRows = (data.top_customers || []).map((row) => [
+    escapeHtml(row.name),
+    maskEmail(row.email),
+    formatCurrency(row.revenue),
+    formatInteger(row.orders),
+    row.last_order_at ? formatDateTime(row.last_order_at) : "—",
+  ]);
+  const ga4Channels = data.audience?.sources?.ga4?.channel || data.audience?.overview?.channel || [];
+  const channelVisitors = ga4Channels.slice(0, 6).map((row) => [row.name, Number(row.users || 0), formatInteger(row.users)]);
+  const channelConversionRows = buildOperationsChannelConversion(data.channel_sales || [], ga4Channels);
+  const provinceRows = data.province_sales || [];
+
+  const checkoutAttempts = Number(ga4.checkouts || 0);
+  const purchases = Number(ga4.purchases || summary.orders || 0);
+  const abandonedCheckouts = Math.max(checkoutAttempts - purchases, 0);
+  const abandonedAmount = abandonedCheckouts * Number(summary.aov || 0);
+  const completionRate = Number(ga4.payment_completion_rate || 0);
+
+  const previousCheckoutAttempts = Number(previousGa4.checkouts || 0);
+  const previousPurchases = Number(previousGa4.purchases || previousSummary.orders || 0);
+  const previousAbandonedCheckouts = Math.max(previousCheckoutAttempts - previousPurchases, 0);
+  const previousAbandonedAmount = previousAbandonedCheckouts * Number(previousSummary.aov || 0);
+  const previousCompletionRate = Number(previousGa4.payment_completion_rate || 0);
+
+  const days = inclusiveDaysFromRange(data.range);
+  const avgOrdersPerDay = days ? Number(summary.orders || 0) / days : 0;
+
+  return `
+    <div class="grid cols-5">
+      ${metricCard("总销售额", formatCurrency(summary.gmv), cardDelta.gmv, "Shopify", metricSeries)}
+      ${metricCard("商品总额", formatCurrency(summary.gross_sales), cardDelta.gross_sales, "Shopify", trendSeries)}
+      ${metricCard("订单数", formatInteger(summary.orders), cardDelta.orders, "Shopify", metricSeries)}
+      ${metricCard("客单价", formatCurrency(summary.aov), cardDelta.aov, "Shopify", metricSeries)}
+      ${metricCard("退款额", formatCurrency(summary.refunds), cardDelta.refunds, "Shopify", spikySeries)}
+    </div>
+    ${section("弃购分析", "", "", `<div class="grid cols-4">
+      ${simpleMetric("结账次数", formatInteger(checkoutAttempts), compareDelta(checkoutAttempts, previousCheckoutAttempts))}
+      ${simpleMetric("弃购次数", formatInteger(abandonedCheckouts), compareDelta(abandonedCheckouts, previousAbandonedCheckouts))}
+      ${simpleMetric("弃购金额", formatCurrency(abandonedAmount), compareDelta(abandonedAmount, previousAbandonedAmount))}
+      ${simpleMetric("结账完成率", `${formatNumber(completionRate)}%`, compareDelta(completionRate, previousCompletionRate))}
+    </div>`)}
+    ${section("日均单量", "根据当前时间范围内日均订单自动计算", "", `<div class="grid cols-3">
+      <div class="card pad"><div class="metric-label">日均订单量</div><div class="metric-value">${formatNumber(avgOrdersPerDay)}</div><div class="small-label">单/天</div></div>
+      <div class="card pad"><div class="metric-label">区间总订单</div><div class="metric-value">${formatInteger(summary.orders)}</div><div class="small-label">订单</div></div>
+      <div class="card pad"><div class="metric-label">统计天数</div><div class="metric-value">${formatInteger(days)}</div><div class="small-label">天</div></div>
+    </div>`)}
+    <div class="grid cols-2">
+      ${donutCard("订单类型", orderMix.map((row) => [row.name, row.percentage]), ["#00896b", "#6375d6"])}
+      ${couponUsageSummaryCard(data.coupon_usage || [], summary.orders || 0)}
+      ${funnelProgressCard(
+        "结账转化漏斗",
+        [
+          ["发起结账", checkoutAttempts, 100],
+          ["完成结账", purchases, checkoutAttempts ? (purchases / checkoutAttempts) * 100 : 0],
+          ["弃购", abandonedCheckouts, checkoutAttempts ? (abandonedCheckouts / checkoutAttempts) * 100 : 0],
+        ],
+        pill("Shopify"),
+      )}
+      ${deviceRows.length ? progressDistributionCard("访问设备明细", deviceRows.map(([label, value]) => [label, value, value]), formatInteger, pill("GA4")) : personaEmptyState("访问设备明细暂无真实数据")}
+    </div>
+    ${section("高价值客户", "按当前时间范围内客户销售额排序", "", topCustomerRows.length ? tableCard("", ["客户", "邮箱", "销售额", "件数", "最近下单"], topCustomerRows) : personaEmptyState("当前时间范围内暂无高价值客户数据"))}
+    ${section("销售趋势", "", "", dualLineChartCard("GMV vs 商品总额", daily.map((row) => ({ label: row.day, value: row.gmv })), daily.map((row) => ({ label: row.day, value: row.gross_sales })), "销售额", "商品总额"))}
+    <div class="grid cols-2">
+      ${channelVisitors.length ? barChartCard("访客渠道来源", channelVisitors, "var(--green)") : personaEmptyState("GA4 暂无渠道访客数据")}
+      ${channelConversionRows.length
+        ? barChartCard("渠道转化率", channelConversionRows.map((row) => [row[0], row[1], `${formatNumber(row[1])}%`]), "#6375d6")
+        : personaEmptyState("缺少可计算的渠道转化率", "需要同时有 GA4 渠道访客和 Shopify 渠道订单。")}
+    </div>
+    ${section("商品销量排行", "", "", tableCard("", ["#", "商品", "销量", "销售额"], (data.top_products || []).map((row, index) => [index + 1, escapeHtml(row.title), formatInteger(row.units_sold), formatCurrency(row.revenue)])))}
+    ${section("州/省销售分布", "按 Shopify 订单地址聚合", "", provinceRows.length ? stateRevenueBoard(provinceRows) : personaEmptyState("当前时间范围内暂无州/省销售分布"))}
+  `;
+}
+
+function simpleMetric(label, value, delta) {
+  const down = String(delta).includes("-");
+  return `<div class="card pad"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="delta ${down ? "down" : ""}">${down ? "↘" : "↗"} ${delta}</div></div>`;
+}
+
+function dualLineChartCard(title, primarySeries, secondarySeries, primaryLabel, secondaryLabel) {
+  const points = primarySeries.map((row, index) => ({
+    label: row.label,
+    primary: Number(row.value || 0),
+    secondary: Number(secondarySeries[index]?.value || 0),
+  }));
+  if (!points.length) return personaEmptyState(`${title} 暂无真实数据`);
+
+  const values = points.flatMap((row) => [row.primary, row.secondary]);
+  const max = Math.max(...values, 0);
+  const min = Math.min(...values, 0);
+  const toCoords = (key) =>
+    points.map((row, index) => [
+      (index / Math.max(points.length - 1, 1)) * 100,
+      56 - ((Number(row[key]) - min) / (max - min || 1)) * 44,
+    ]);
+
+  return `
+    <div class="card pad chart-card line-chart-card">
+      <div class="chart-title">${title}</div>
+      <div class="line-legend">
+        <span><i style="background:#00896b"></i>${primaryLabel}</span>
+        <span><i style="background:#6375d6"></i>${secondaryLabel}</span>
+      </div>
+      <svg class="line-chart" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true">
+        <path class="line-grid" d="M0,14 H100 M0,30 H100 M0,46 H100"></path>
+        <path class="line-primary" d="${smoothPath(toCoords("primary"))}"></path>
+        <path class="line-secondary" d="${smoothPath(toCoords("secondary"))}"></path>
+      </svg>
+    </div>
+  `;
+}
+
+function inclusiveDaysFromRange(range) {
+  if (!range?.start || !range?.end) return 0;
+  const start = new Date(`${range.start}T00:00:00Z`);
+  const end = new Date(`${range.end}T00:00:00Z`);
+  return Math.max(1, Math.floor((end - start) / 86400000) + 1);
+}
+
+function prettyChannel(value) {
+  const text = String(value || "unknown").trim();
+  if (!text) return "Unknown";
+  return text
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function maskEmail(value) {
+  const text = String(value || "").trim();
+  if (!text || !text.includes("@")) return "—";
+  const [name, domain] = text.split("@");
+  if (name.length <= 2) return `${name[0] || "*"}***@${domain}`;
+  return `${name.slice(0, 2)}***@${domain}`;
+}
+
+function couponUsageSummaryCard(rows, totalOrders) {
+  const safeRows = (rows || []).slice(0, 4);
+  if (!safeRows.length) return personaEmptyState("优惠券使用暂无真实数据");
+
+  const total = totalOrders || safeRows.reduce((sum, row) => sum + Number(row.orders || 0), 0) || 1;
+  const colors = ["#d7dde7", "#7a55dc", "#00896b", "#6375d6"];
+  let cursor = 0;
+  const segments = safeRows
+    .map((row, index) => {
+      const share = (Number(row.orders || 0) / total) * 100;
+      const segment = `${colors[index % colors.length]} ${cursor}% ${cursor + share}%`;
+      cursor += share;
+      return segment;
+    })
+    .join(", ");
+
+  return `
+    <div class="card pad chart-card">
+      <div class="chart-head-inline">
+        <div class="chart-title">优惠券使用</div>
+        <span class="small-badge">用券率 ${formatNumber(totalOrders ? safeRows.reduce((sum, row) => sum + Number(row.orders || 0), 0) / totalOrders * 100 : 0)}%</span>
+      </div>
+      <div class="stack-progress" style="background:linear-gradient(90deg, ${segments})"></div>
+      <div class="legend compact">
+        ${safeRows
+          .map(
+            (row, index) => `
+              <div class="legend-row">
+                <span class="legend-label"><span class="dot" style="background:${colors[index % colors.length]}"></span>${escapeHtml(row.category)}</span>
+                <span class="muted">${formatInteger(row.orders)} / ${formatNumber(row.order_share)}%</span>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
+function funnelProgressCard(title, rows, sourceTag = "") {
+  const max = Math.max(...rows.map((row) => Number(row[1] || 0)), 0) || 1;
+  return `
+    <div class="card pad chart-card">
+      <div class="chart-head-inline">
+        <div class="chart-title">${title}</div>
+        ${sourceTag}
+      </div>
+      <div class="bar-chart progress-chart">
+        ${rows
+          .map(
+            ([label, value, ratio]) => `
+              <div class="progress-row">
+                <div class="progress-meta">
+                  <strong>${label}</strong>
+                  <span>${formatNumber(ratio)}%</span>
+                </div>
+                <div class="bar-track"><div class="bar-fill" style="width:${Math.max((Number(value || 0) / max) * 100, Number(value || 0) > 0 ? 2 : 0)}%"></div></div>
+                <b class="muted">${formatInteger(value)}</b>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
+function progressDistributionCard(title, rows, valueFormatter = formatInteger, sourceTag = "") {
+  const max = Math.max(...rows.map((row) => Number(row[2] || row[1] || 0)), 0) || 1;
+  return `
+    <div class="card pad chart-card">
+      <div class="chart-head-inline">
+        <div class="chart-title">${title}</div>
+        ${sourceTag}
+      </div>
+      <div class="bar-chart progress-chart">
+        ${rows
+          .map(
+            ([label, ratio, absolute]) => `
+              <div class="progress-row">
+                <div class="progress-meta">
+                  <strong>${label}</strong>
+                  <span>${formatNumber(ratio)}%</span>
+                </div>
+                <div class="bar-track"><div class="bar-fill" style="width:${Math.max((Number(absolute || 0) / max) * 100, Number(absolute || 0) > 0 ? 2 : 0)}%"></div></div>
+                <b class="muted">${valueFormatter(absolute)}</b>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
+function stateRevenueBoard(rows) {
+  const safeRows = rows.slice(0, 12);
+  const max = Math.max(...safeRows.map((row) => Number(row.revenue || 0)), 0) || 1;
+  return `
+    <div class="card pad map-panel">
+      <div class="state-grid">
+        ${safeRows
+          .map((row) => {
+            const intensity = Math.max(Number(row.revenue || 0) / max, 0.18);
+            return `
+              <div class="state-tile" style="--tile-alpha:${intensity}">
+                <strong>${escapeHtml(row.province)}</strong>
+                <span>${formatCurrency(row.revenue)}</span>
+                <small>${formatInteger(row.orders)} 单</small>
+              </div>
+            `;
+          })
+          .join("")}
+      </div>
+      <div>${miniRanks(rows)}</div>
+    </div>
+  `;
+}
+
+function buildOperationsChannelConversion(channelSales, ga4Channels) {
+  const ga4Map = new Map();
+  (ga4Channels || []).forEach((row) => {
+    ga4Map.set(normalizeChannelGroup(row.name), Number(row.users || 0));
+  });
+
+  return (channelSales || [])
+    .map((row) => {
+      const label = normalizeChannelGroup(row.channel);
+      const sessions = ga4Map.get(label) || 0;
+      return {
+        label,
+        sessions,
+        cvr: sessions ? (Number(row.orders || 0) / sessions) * 100 : 0,
+      };
+    })
+    .filter((row) => row.sessions > 0)
+    .sort((a, b) => b.sessions - a.sessions)
+    .slice(0, 6)
+    .map((row) => [row.label, row.cvr]);
+}
+
+function normalizeChannelGroup(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return "Other";
+  if (text.includes("paid social") || text.includes("facebook") || text.includes("instagram") || text.includes("meta") || text.includes("tiktok")) {
+    return "Paid Social";
+  }
+  if (text.includes("paid search") || text.includes("google ads") || text.includes("bing ads") || text.includes("cpc")) {
+    return "Paid Search";
+  }
+  if (text.includes("organic social")) {
+    return "Organic Social";
+  }
+  if (text.includes("organic search") || text === "google" || text.includes("seo")) {
+    return "Organic Search";
+  }
+  if (text.includes("email")) {
+    return "Email";
+  }
+  if (text.includes("direct") || text.includes("unknown") || text.includes("none")) {
+    return "Direct";
+  }
+  return prettyChannel(value);
+}
+
 function renderAudienceDonut(title, rows, colors, hint = "") {
   if (!rows?.length) return personaEmptyState(`${title} 暂无真实数据`, hint);
   return donutCard(title, rows.slice(0, 8).map((row) => [row.name, Number(row.percentage || row.value || 0)]), colors);
@@ -875,22 +1204,22 @@ function renderAudienceBar(title, rows, hint = "") {
 
 function renderAudienceTable(title, label, rows) {
   if (!rows?.length) return personaEmptyState(`${title} 暂无真实数据`);
-  return tableCard(title, [label, "Users", "占比"], rows.slice(0, 12).map((row) => [escapeHtml(row.name), formatInteger(row.users), `${formatNumber(row.percentage)}%`]));
+  return compactTableCard(title, [label, "Users", "占比"], rows.slice(0, 12).map((row) => [escapeHtml(row.name), formatInteger(row.users), `${formatNumber(row.percentage)}%`]));
 }
 
 function renderInterestTable(rows) {
   if (!rows?.length) return personaEmptyState("兴趣标签暂无真实数据");
-  return tableCard("兴趣标签", ["兴趣类别", "Affinity", "占比"], rows.slice(0, 12).map((row) => [escapeHtml(row.name), formatNumber(row.affinity || row.users), `${formatNumber(row.percentage)}%`]));
+  return compactTableCard("兴趣标签", ["兴趣类别", "Affinity", "占比"], rows.slice(0, 12).map((row) => [escapeHtml(row.name), formatNumber(row.affinity || row.users), `${formatNumber(row.percentage)}%`]));
 }
 
 function renderShopifyValueTable(rows) {
   if (!rows?.length) return personaEmptyState("客户价值画像暂无真实数据");
   const totalCustomers = rows.reduce((sum, row) => sum + Number(row.customers || 0), 0) || 1;
-  return tableCard("客户价值画像", ["价值分层", "客户数", "销售额", "客单价", "占比"], rows.map((row) => [escapeHtml(row.name || row.segment), formatInteger(row.customers), formatCurrency(row.revenue), formatCurrency(row.aov), `${formatNumber((Number(row.customers || 0) / totalCustomers) * 100)}%`]));
+  return compactTableCard("客户价值画像", ["价值分层", "客户数", "销售额", "客单价", "占比"], rows.map((row) => [escapeHtml(row.name || row.segment), formatInteger(row.customers), formatCurrency(row.revenue), formatCurrency(row.aov), `${formatNumber((Number(row.customers || 0) / totalCustomers) * 100)}%`]));
 }
 
 function hasAudienceData(snapshot) {
-  return ["gender", "age", "interest", "language", "country", "city", "device"].some((key) => Array.isArray(snapshot?.[key]) && snapshot[key].length);
+  return ["gender", "age", "interest", "language", "country", "city", "device", "channel"].some((key) => Array.isArray(snapshot?.[key]) && snapshot[key].length);
 }
 
 function getAudienceMissingHint(segmentType, sync) {
@@ -903,40 +1232,39 @@ function getAudienceMissingHint(segmentType, sync) {
   return `GA4 同步时跳过了 ${segmentType} 维度。`;
 }
 
-function operationsPage() {
+function renderPersonaInsights(snapshot, shopifyPersona = null) {
+  const insights = [];
+  const topGender = snapshot?.gender?.[0];
+  const topAge = snapshot?.age?.[0];
+  const topCountry = snapshot?.country?.[0];
+  const topCity = snapshot?.city?.[0];
+  const topDevice = snapshot?.device?.[0];
+  const topInterest = snapshot?.interest?.[0];
+  const topLanguage = snapshot?.language?.[0];
+  const repeatRate = shopifyPersona?.metrics?.repeat_rate;
+  const aov = shopifyPersona?.metrics?.aov;
+
+  if (topGender) insights.push(`性别上以 ${topGender.name} 为主，占比 ${formatNumber(topGender.percentage)}%。`);
+  if (topAge) insights.push(`年龄段集中在 ${topAge.name}，是当前最核心的人群层。`);
+  if (topCountry) insights.push(`地区上 ${topCountry.name} 占比最高，用户占比 ${formatNumber(topCountry.percentage)}%。`);
+  if (topCity) insights.push(`城市层面 ${topCity.name} 当前最活跃。`);
+  if (topDevice) insights.push(`设备偏好以 ${topDevice.name} 为主，占比 ${formatNumber(topDevice.percentage)}%。`);
+  if (topLanguage) insights.push(`语言分布中 ${topLanguage.name} 当前占优。`);
+  if (topInterest) insights.push(`兴趣标签里 ${topInterest.name} 最突出，可用于后续广告素材和受众包。`);
+  if (repeatRate !== undefined && repeatRate !== null) insights.push(`Shopify 客户复购率目前为 ${formatNumber(repeatRate)}%，可以结合价值分层继续做精细化运营。`);
+  if (aov !== undefined && aov !== null) insights.push(`当前客单价约为 ${formatCurrency(aov)}，建议结合核心年龄与地区做定向投放。`);
+
+  if (!insights.length) return personaEmptyState("当前时间范围内还没有足够的人群画像特征可供分析");
+
   return `
-    <div class="grid cols-5">
-      ${metricCard("总销售额", "US$42,783.80", "-8.69%")}
-      ${metricCard("商品总额", "US$44,591.80", "-9.54%")}
-      ${metricCard("订单数", "250", "-7.06%")}
-      ${metricCard("客单价", "US$178.37", "-2.67%")}
-      ${metricCard("退款额", "US$1,808.00", "+25.98%", "Shopify", spikySeries)}
+    <div class="insight-list">
+      ${insights.slice(0, 6).map((text) => `<div class="insight-item">${escapeHtml(text)}</div>`).join("")}
     </div>
-    ${section("弃购分析", "", "", `<div class="grid cols-4">
-      <div class="card pad"><div class="metric-label">结账次数</div><div class="metric-value">810</div><div class="delta">↗ +8.50%</div></div>
-      <div class="card pad"><div class="metric-label">弃购次数</div><div class="metric-value">769</div><div class="delta">↗ +1.70%</div></div>
-      <div class="card pad"><div class="metric-label">弃购金额</div><div class="metric-value">US$102,271.20</div><div class="delta down">↘ -1.40%</div></div>
-      <div class="card pad"><div class="metric-label">结账完成率</div><div class="metric-value">5.10%</div><div class="delta down">↘ -2.30%</div></div>
-    </div>`)}
-    <div class="grid cols-2">
-      ${donutCard("订单类型", [["普通", 76.4], ["B2B", 23.6]], ["#00896b", "#6375d6"])}
-      <div data-coupon-usage-summary>${tableCard("优惠券使用", ["分类", "订单数", "占比"], [
-        ["未用券", "104", "41.60%"],
-        ["新人券", "0", "0.00%"],
-        ["活动券", "81", "32.40%"],
-        ["达人券", "65", "26.00%"],
-      ])}</div>
-      ${barChartCard("转化漏斗", [["网站访客", 848991], ["进入购物车", 334182], ["点击支付", 112223], ["输入信用卡", 74917], ["购买成功", 54880]])}
-      ${barChartCard("访问设备明细", [["手机", 460396], ["电脑", 280179], ["平板", 108416]], "#6375d6")}
-    </div>
-    ${section("销售趋势", "", "", `<div class="card pad">${sparkline(trendSeries)}${sparkline(trendSeries.slice().reverse())}</div>`)}
-    <div class="grid cols-2">
-      ${barChartCard("访客渠道来源", [["Instagram", 420000], ["邮件营销", 415000], ["Google", 360000], ["TikTok", 210000], ["联盟推广", 190000], ["Facebook", 110000], ["直播访问", 90000]])}
-      ${barChartCard("渠道转化率", [["Facebook", 3.8], ["直接访问", 3.4], ["联盟推广", 2.1], ["TikTok", 1.8], ["Google", 1.1], ["邮件营销", 0.8], ["Instagram", 0.6]], "#8e98aa")}
-    </div>
-    ${section("商品销量排行", "", "", `<div data-top-products>${tableCard("", ["#", "商品", "销量", "销售额"], productRows.map((r, i) => [i + 1, ...r]))}</div>`)}
-    ${section("美国各州销售分布", "仅统计美国市场订单", "", `<div class="card pad map-panel"><div class="us-map"></div><div>${miniRanks()}</div></div>`)}
   `;
+}
+
+function operationsPage() {
+  return `<div data-operations-content>${personaEmptyState("正在加载运营数据看板…")}</div>`;
 }
 
 function marketingPage() {
@@ -987,6 +1315,7 @@ function customersPage() {
       ${metricCard("复购率", "5.30%", "+66.85%")}
       ${metricCard("新客销售额", "US$247,427.04", "-22.41%")}
     </div>`)}</div>
+    <div data-customer-demographics>${section("用户画像分析", "结合 GA4 与 Shopify 的核心用户特征", `${pill("GA4")} ${pill("Shopify")}`, personaEmptyState("正在加载用户画像分析…"))}</div>
     <div class="grid cols-2">
       <div data-customer-segments>${tableCard("用户分群", ["分类", "客户数", "销售额", "占比"], [
         ["单次购买", "1,348", "US$252,365.26", "98.97%"],
@@ -996,17 +1325,17 @@ function customersPage() {
         ["高价值客户", "396", "US$92,779.76", "29.07%"],
         ["复购客户", "70", "US$10,323.77", "5.14%"],
       ])}</div>
-      ${donutCard("客户分类分布", [["未用券客户", 20.26], ["新人券客户", 2.35], ["站内活动券客户", 42.88], ["达人券客户", 34.51]], ["#667085", "#f59e0b", "#00896b", "#3166d6"])}
+      <div data-customer-segment-distribution>${donutCard("客户分类分布", [["未用券客户", 20.26], ["新人券客户", 2.35], ["站内活动券客户", 42.88], ["达人券客户", 34.51]], ["#667085", "#f59e0b", "#00896b", "#3166d6"])}</div>
     </div>
     ${section("地域分布", "", pill("Shopify"), `<div class="grid cols-2">
       ${barChartCard("区域销售额", countryRows.map((r) => [r[0], Number(r[2].replace(/[^0-9.]/g, ""))]))}
       ${barChartCard("区域客单价", countryRows.map((r) => [r[0], Number(r[3].replace(/[^0-9.]/g, ""))]), "#6375d6")}
     </div><div data-country-sales>${tableCard("国家分布", ["地区", "客户数", "销售额", "客单价", "占比"], countryRows)}</div>`)}
-    ${section("获客质量", "", pill("Shopify"), `<div class="grid cols-3">
+    <div data-customers-acquisition-quality>${section("获客质量", "", pill("Shopify"), `<div class="grid cols-3">
       ${metricCard("联盟客户占比", "30.60%", "-31.68%")}
       ${barChartCard("渠道客户数", [["Google", 461], ["直接访问", 428], ["Facebook", 253], ["Instagram", 154], ["其他", 43], ["Organic Search", 23]])}
       ${barChartCard("渠道复购率", [["Google", 6.61], ["直接访问", 6.0], ["Facebook", 2.36], ["Instagram", 3.9], ["其他", 6.82], ["Organic Search", 4.35]], "#45bd9d")}
-    </div>`)}
+    </div>`)}</div>
     <div data-customers-value>${section("用户价值", "人均消费、购买频次、LTV 与二次购买间隔", pill("Shopify"), `<div class="grid cols-4">
       ${metricCard("人均消费", "US$188.07", "-26.22%")}
       ${metricCard("LTV（生命周期价值）", "US$76.58", "+0.00%")}
@@ -1065,19 +1394,14 @@ function aarrrPage() {
       ${metricCard("回头客销售额", "US$8,726.94", "-93.56%", "Shopify", spikySeries)}
       ${metricCard("复购率", "5.30%", "+66.67%")}
     </div>`)}</div>
-    ${stage("R", "Referral", "推荐 · 联盟与达人导购", `<div class="grid cols-3">
-      ${metricCard("联盟订单", "418", "-47.82%")}
-      ${metricCard("联盟销售额", "US$79,166.29", "-43.53%")}
-      ${metricCard("联盟订单占比", "30.40%", "-32.00%")}
-      ${metricCard("达人券订单", "474", "-40.90%")}
-      ${metricCard("达人券销售额", "US$89,006.36", "-36.51%")}
-    </div>${tableCard("联盟达人排行", ["#", "联盟/达人", "订单数", "销售额", "订单占比"], [
-      ["1", "JGARCIAS", "124", "US$23,640.75", "9.01%"],
-      ["2", "GROW", "103", "US$19,497.55", "7.48%"],
-      ["3", "META15", "34", "US$6,592.69", "2.47%"],
-      ["4", "MICHELLE15", "33", "US$6,370.97", "2.40%"],
-      ["5", "HERO", "33", "US$6,200.77", "2.40%"],
-    ])}`)}
+    <div data-aarrr-referral>${stage("R", "Referral", "推荐 · 联盟与达人导购", `
+      <div class="grid cols-3">
+        ${metricCard("联盟订单", "0", "0.00%", "Shopify", [0, 0, 0, 0, 0, 0])}
+        ${metricCard("联盟销售额", formatCurrency(0), "0.00%", "Shopify", [0, 0, 0, 0, 0, 0])}
+        ${metricCard("联盟订单占比", "0.00%", "0.00%", "Shopify", [0, 0, 0, 0, 0, 0])}
+        ${metricCard("达人券订单", "0", "0.00%", "Shopify", [0, 0, 0, 0, 0, 0])}
+        ${metricCard("达人券销售额", formatCurrency(0), "0.00%", "Shopify", [0, 0, 0, 0, 0, 0])}
+      </div>${tableCard("联盟达人排行", ["#", "联盟/达人", "订单数", "销售额", "订单占比"], [])}`)}</div>
   `;
 }
 
@@ -1390,18 +1714,21 @@ function couponTable(rows) {
   );
 }
 
-function miniRanks() {
+function miniRanks(rows = []) {
+  const sourceRows = rows.length
+    ? rows.slice(0, 6).map((row) => [row.province || row.country || row.name, formatCurrency(row.revenue), formatInteger(row.orders)])
+    : [
+        ["佛罗里达", "US$24,605.22", "128 单"],
+        ["纽约", "US$23,985.05", "127 单"],
+        ["加利福尼亚", "US$23,928.76", "124 单"],
+        ["德克萨斯", "US$19,258.29", "112 单"],
+        ["佐治亚", "US$17,628.89", "96 单"],
+        ["新泽西", "US$13,536.94", "72 单"],
+      ];
   return `
     <div class="mini-list">
-      ${[
-        ["佛罗里达", "US$24,605.22"],
-        ["纽约", "US$23,985.05"],
-        ["加利福尼亚", "US$23,928.76"],
-        ["德克萨斯", "US$19,258.29"],
-        ["佐治亚", "US$17,628.89"],
-        ["新泽西", "US$13,536.94"],
-      ]
-        .map((r, i) => `<div class="mini-rank"><b>${i + 1}</b><span>${r[0]}</span><strong>${r[1]}</strong></div>`)
+      ${sourceRows
+        .map((r, i) => `<div class="mini-rank"><b>${i + 1}</b><span>${r[0]}</span><strong>${r[1]}${r[2] ? `<small>${r[2]}</small>` : ""}</strong></div>`)
         .join("")}
     </div>
   `;
@@ -2154,7 +2481,10 @@ function applyDashboardData(data) {
   const customerQuality = data.customer_quality || {};
   const previous = data.previous || {};
   const previousSummary = previous.summary || {};
+  const previousCustomerCouponSegments = previous.customer_coupon_segments || [];
   const previousCustomerQuality = previous.customer_quality || {};
+  const referral = data.referral || {};
+  const previousReferral = previous.referral || {};
   const previousGa4Funnel = previous.ga4_funnel || {};
   const adTotals = buildAdTotals(data.ad_performance || []);
   const previousAdTotals = buildAdTotals(previous.ad_performance || []);
@@ -2215,6 +2545,11 @@ function applyDashboardData(data) {
       previousCustomerQuality.new_customers ? previousAdTotals.spend / previousCustomerQuality.new_customers : 0,
     ),
     coupon_order_rate: compareDelta(summary.coupon_order_rate, previousSummary.coupon_order_rate),
+    affiliate_orders: compareDelta(referral.affiliate_orders, previousReferral.affiliate_orders),
+    affiliate_revenue: compareDelta(referral.affiliate_revenue, previousReferral.affiliate_revenue),
+    affiliate_order_share: compareDelta(referral.affiliate_order_share, previousReferral.affiliate_order_share),
+    influencer_coupon_orders: compareDelta(referral.influencer_coupon_orders, previousReferral.influencer_coupon_orders),
+    influencer_coupon_revenue: compareDelta(referral.influencer_coupon_revenue, previousReferral.influencer_coupon_revenue),
   };
 
   const progress = document.querySelector(".progress > span");
@@ -2227,6 +2562,11 @@ function applyDashboardData(data) {
   const syncBar = document.querySelector(".sync-bar");
   if (syncBar && data.sync?.last_synced_at) {
     syncBar.innerHTML = `Last Sync Time: <strong>${formatDateTime(data.sync.last_synced_at)}</strong>`;
+  }
+
+  const operationsContent = document.querySelector("[data-operations-content]");
+  if (operationsContent) {
+    operationsContent.innerHTML = renderOperationsDashboard(data, cardDelta);
   }
 
   const personaOverview = document.querySelector("[data-persona-overview]");
@@ -2708,6 +3048,59 @@ function applyDashboardData(data) {
     );
   }
 
+  const customerDemographics = document.querySelector("[data-customer-demographics]");
+  if (customerDemographics) {
+    const insightHtml = renderPersonaInsights(data.audience?.overview || {}, data.shopify_persona || null);
+    customerDemographics.innerHTML = section(
+      "用户画像分析",
+      "结合 GA4 与 Shopify 的核心用户特征",
+      `${pill("GA4")} ${pill("Shopify")}`,
+      insightHtml || personaEmptyState("当前暂无足够的用户画像数据"),
+    );
+  }
+
+  const customerSegmentDistribution = document.querySelector("[data-customer-segment-distribution]");
+  if (customerSegmentDistribution) {
+    const rows = (data.customer_coupon_segments || []).map((row) => [`${row.category}客户`, number(row.percentage)]);
+    customerSegmentDistribution.innerHTML = rows.length
+      ? donutCard("客户分类分布", rows, ["#667085", "#f59e0b", "#00896b", "#3166d6", "#45bd9d"])
+      : personaEmptyState("客户分类分布暂无真实数据");
+  }
+
+  const customersAcquisitionQuality = document.querySelector("[data-customers-acquisition-quality]");
+  if (customersAcquisitionQuality) {
+    const channelQuality = data.customer_channel_quality || [];
+    const affiliateShare = (data.customer_coupon_segments || []).find((row) => row.category === "达人券")?.percentage || 0;
+    const previousAffiliateShare = previousCustomerCouponSegments.find((row) => row.category === "达人券")?.percentage || 0;
+    customersAcquisitionQuality.innerHTML = section(
+      "获客质量",
+      "按真实渠道客户数、渠道销售额与复购率评估获客质量",
+      pill("Shopify"),
+      `<div class="grid cols-3">
+        ${metricCard("联盟客户占比", `${formatNumber(affiliateShare)}%`, compareDelta(affiliateShare, previousAffiliateShare))}
+        ${barChartCard(
+          "渠道客户数",
+          channelQuality.map((row) => [normalizeChannelGroup(row.channel), number(row.customers)]),
+        )}
+        ${barChartCard(
+          "渠道复购率",
+          channelQuality.map((row) => [normalizeChannelGroup(row.channel), number(row.repeat_rate)]),
+          "#45bd9d",
+        )}
+      </div>${tableCard(
+        "渠道客户质量",
+        ["渠道", "客户数", "复购客户", "复购率", "销售额"],
+        channelQuality.map((row) => [
+          escapeHtml(normalizeChannelGroup(row.channel)),
+          formatInteger(row.customers),
+          formatInteger(row.repeat_customers),
+          `${formatNumber(row.repeat_rate)}%`,
+          formatCurrency(row.revenue),
+        ]),
+      )}`,
+    );
+  }
+
   const customersValue = document.querySelector("[data-customers-value]");
   if (customersValue) {
     customersValue.innerHTML = section(
@@ -2763,6 +3156,35 @@ function applyDashboardData(data) {
         ${metricCard("回头客销售额", formatCurrency(customerQuality.returning_customer_revenue), cardDelta.returning_customer_revenue, "Shopify", spikySeries)}
         ${metricCard("复购率", `${formatNumber(customerQuality.repeat_rate)}%`, cardDelta.repeat_rate)}
       </div>`,
+      pill("Shopify"),
+    );
+  }
+
+  const aarrrReferral = document.querySelector("[data-aarrr-referral]");
+  if (aarrrReferral) {
+    const referralRevenueSeries = (referral.daily || []).map((row) => number(row.revenue));
+    const referralOrdersSeries = (referral.daily || []).map((row) => number(row.orders));
+    aarrrReferral.innerHTML = stage(
+      "R",
+      "Referral",
+      "推荐 · 联盟与达人导购",
+      `<div class="grid cols-3">
+        ${metricCard("联盟订单", formatInteger(referral.affiliate_orders), cardDelta.affiliate_orders, "Shopify", referralOrdersSeries)}
+        ${metricCard("联盟销售额", formatCurrency(referral.affiliate_revenue), cardDelta.affiliate_revenue, "Shopify", referralRevenueSeries)}
+        ${metricCard("联盟订单占比", `${formatNumber(referral.affiliate_order_share)}%`, cardDelta.affiliate_order_share, "Shopify", referralOrdersSeries)}
+        ${metricCard("达人券订单", formatInteger(referral.influencer_coupon_orders), cardDelta.influencer_coupon_orders, "Shopify", referralOrdersSeries)}
+        ${metricCard("达人券销售额", formatCurrency(referral.influencer_coupon_revenue), cardDelta.influencer_coupon_revenue, "Shopify", referralRevenueSeries)}
+      </div>${tableCard(
+        "联盟达人排行",
+        ["#", "联盟/达人", "订单数", "销售额", "订单占比"],
+        (referral.top_referrers || []).map((row, index) => [
+          String(index + 1),
+          escapeHtml(row.owner),
+          formatInteger(row.orders),
+          formatCurrency(row.revenue),
+          `${formatNumber(row.order_share)}%`,
+        ]),
+      )}`,
       pill("Shopify"),
     );
   }

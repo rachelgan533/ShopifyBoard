@@ -552,6 +552,60 @@ button {
   margin-bottom: 14px;
 }
 
+.line-chart-card {
+  min-height: 320px;
+}
+
+.line-legend {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  color: #68707b;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.line-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.line-legend i {
+  width: 18px;
+  height: 3px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.line-chart {
+  width: 100%;
+  height: 220px;
+  display: block;
+}
+
+.line-grid {
+  stroke: #e7ebef;
+  stroke-width: 0.6;
+  fill: none;
+}
+
+.line-primary,
+.line-secondary {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.line-primary {
+  stroke: var(--green-2);
+}
+
+.line-secondary {
+  stroke: #6375d6;
+}
+
 .donut-wrap {
   display: grid;
   grid-template-columns: 220px 1fr;
@@ -641,10 +695,24 @@ button {
   overflow-x: auto;
 }
 
+.table-wrap.compact {
+  overflow-x: hidden;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
   min-width: 620px;
+}
+
+.table-wrap.compact table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.table-wrap.compact td,
+.table-wrap.compact th {
+  word-break: break-word;
 }
 
 th,
@@ -673,6 +741,21 @@ th.num {
 
 tr:last-child td {
   border-bottom: 0;
+}
+
+.insight-list {
+  display: grid;
+  gap: 12px;
+}
+
+.insight-item {
+  border-radius: 10px;
+  background: #f7faf9;
+  border: 1px solid #e6efec;
+  color: #33404b;
+  padding: 14px 16px;
+  font-size: 14px;
+  line-height: 1.65;
 }
 
 .hero-goal {
@@ -1089,6 +1172,60 @@ tr:last-child td {
   align-items: stretch;
 }
 
+.chart-head-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.small-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  background: #e7f6f0;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 6px 10px;
+}
+
+.stack-progress {
+  height: 12px;
+  border-radius: 999px;
+  margin: 6px 0 18px;
+}
+
+.legend.compact {
+  gap: 10px;
+}
+
+.progress-chart {
+  gap: 16px;
+}
+
+.progress-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #68707b;
+  font-size: 13px;
+}
+
+.progress-meta strong {
+  color: #2f353d;
+  font-size: 13px;
+}
+
 .us-map {
   border-radius: 8px;
   background:
@@ -1099,6 +1236,39 @@ tr:last-child td {
     linear-gradient(135deg, #dcebe6, #eef5f2);
   min-height: 320px;
   position: relative;
+}
+
+.state-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.state-tile {
+  min-height: 84px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 137, 107, 0.12);
+  background: rgba(0, 137, 107, calc(var(--tile-alpha, 0.2) * 0.24));
+  padding: 14px 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.state-tile strong {
+  color: #21303b;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.state-tile span {
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.state-tile small {
+  color: #6b7280;
+  font-size: 12px;
 }
 
 .us-map::after {
@@ -1128,6 +1298,18 @@ tr:last-child td {
 .mini-rank b {
   font-size: 12px;
   color: var(--muted);
+}
+
+.mini-rank strong {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.mini-rank strong small {
+  color: #8e98aa;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .placeholder-line {

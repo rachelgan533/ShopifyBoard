@@ -13,6 +13,7 @@ const AUDIENCE_REPORTS = [
   { dimension: "country", segmentType: "country", limit: 20 },
   { dimension: "city", segmentType: "city", limit: 20 },
   { dimension: "deviceCategory", segmentType: "device", limit: 10 },
+  { dimension: "sessionDefaultChannelGroup", segmentType: "channel", limit: 20 },
 ];
 
 module.exports = async function handler(req, res) {
