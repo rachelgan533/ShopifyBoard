@@ -1604,6 +1604,11 @@ function integrationPage() {
         <label>管理密钥 · 填 Vercel 中的 CRON_SECRET 后才能保存/同步</label>
         <input data-integration-secret type="password" value="${state.integrationSecret}" placeholder="请输入 CRON_SECRET" />
       </div>
+      <div class="button-row" style="margin-top:14px">
+        <button class="ghost-btn" data-action="seed-demo-data">生成演示数据</button>
+        <button class="ghost-btn" data-action="clear-demo-data">清空演示数据</button>
+        <span class="muted">当 Shopify 还没有真实订单时，可一键灌入一套完整的演示数据。</span>
+      </div>
     </div>
     <div class="grid" style="max-width:900px;margin:0 auto">
       ${cards
@@ -1930,6 +1935,16 @@ async function handleAction(action, button) {
 
   if (action === "sync-coupons") {
     await syncCoupons();
+    return;
+  }
+
+  if (action === "seed-demo-data") {
+    await seedDemoData();
+    return;
+  }
+
+  if (action === "clear-demo-data") {
+    await clearDemoData();
     return;
   }
 
@@ -2305,6 +2320,56 @@ async function syncCoupons() {
     showToast(`优惠券同步完成：${data.synced_coupons} 个券码`);
   } catch (error) {
     showToast(`优惠券同步失败：${error.message}`);
+  }
+}
+
+async function seedDemoData() {
+  if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
+
+  showToast("正在生成演示数据...");
+  try {
+    const response = await fetch("/api/demo/seed", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${state.integrationSecret}`,
+      },
+      body: JSON.stringify({
+        action: "seed",
+        days: 30,
+        shop_name: state.storeName || "Canoly Demo Store",
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "演示数据生成失败");
+    invalidateDashboardData();
+    await Promise.all([hydrateDashboardData(), loadGoals(), loadCoupons(), loadIntegrationConfigs()]);
+    showToast(`演示数据已生成：订单 ${data.seeded.orders}，GA4 ${data.seeded.ga4_daily_rows} 天，广告 ${data.seeded.ad_daily_rows} 条`);
+  } catch (error) {
+    showToast(`生成失败：${error.message}`);
+  }
+}
+
+async function clearDemoData() {
+  if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
+
+  showToast("正在清空演示数据...");
+  try {
+    const response = await fetch("/api/demo/seed", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${state.integrationSecret}`,
+      },
+      body: JSON.stringify({ action: "clear" }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "演示数据清空失败");
+    invalidateDashboardData();
+    await Promise.all([hydrateDashboardData(), loadGoals(), loadCoupons(), loadIntegrationConfigs()]);
+    showToast("演示数据已清空。");
+  } catch (error) {
+    showToast(`清空失败：${error.message}`);
   }
 }
 
