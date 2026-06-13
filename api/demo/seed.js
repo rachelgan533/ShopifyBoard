@@ -326,7 +326,6 @@ function buildDemoPayload(shop, days) {
     dayDate.setUTCDate(today.getUTCDate() - (days - 1 - index));
     const day = toDateOnly(dayDate);
     return {
-      id: `demo_ga4_${day}`,
       shop_id: shop.id,
       day,
       sessions,
