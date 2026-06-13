@@ -2401,7 +2401,7 @@ async function loadIntegrationConfigs() {
     const data = await response.json();
     if (!data.ok) return;
 
-    const integrations = data.integrations || [];
+    const integrations = dedupeIntegrationsBySource(data.integrations || []);
     const connectedCount = integrations.filter((item) => item.status === "connected").length;
     const issueCount = integrations.filter((item) => item.status && item.status !== "connected" && item.status !== "disconnected").length;
     updateIntegrationSummary("total", 4);
@@ -2471,6 +2471,19 @@ async function loadIntegrationConfigs() {
 function updateIntegrationSummary(key, value) {
   const node = document.querySelector(`[data-integration-summary="${key}"]`);
   if (node) node.textContent = String(value);
+}
+
+function dedupeIntegrationsBySource(rows) {
+  const latestBySource = new Map();
+  for (const row of rows || []) {
+    const source = String(row?.source || "").trim();
+    if (!source) continue;
+    const current = latestBySource.get(source);
+    const currentTs = Date.parse(current?.updated_at || current?.last_synced_at || current?.last_connected_at || 0) || 0;
+    const nextTs = Date.parse(row?.updated_at || row?.last_synced_at || row?.last_connected_at || 0) || 0;
+    if (!current || nextTs >= currentTs) latestBySource.set(source, row);
+  }
+  return Array.from(latestBySource.values());
 }
 
 function updateStoreIdentity(name) {
