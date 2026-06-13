@@ -634,13 +634,25 @@ async function upsertBatch(table, rows, conflictColumns) {
   const chunkSize = 500;
   for (let start = 0; start < rows.length; start += chunkSize) {
     const chunk = rows.slice(start, start + chunkSize);
-    await supabaseFetch(`/rest/v1/${table}?on_conflict=${encodeURIComponent(conflictColumns)}`, {
-      method: "POST",
-      headers: {
-        prefer: "resolution=merge-duplicates,return=minimal",
-      },
-      body: JSON.stringify(chunk),
-    });
+    try {
+      await supabaseFetch(`/rest/v1/${table}?on_conflict=${encodeURIComponent(conflictColumns)}`, {
+        method: "POST",
+        headers: {
+          prefer: "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify(chunk),
+      });
+    } catch (error) {
+      error.message = `Failed while writing ${table}`;
+      error.details = {
+        ...(error.details || {}),
+        table,
+        chunk_start: start,
+        chunk_size: chunk.length,
+        sample_row: chunk[0] || null,
+      };
+      throw error;
+    }
   }
 }
 

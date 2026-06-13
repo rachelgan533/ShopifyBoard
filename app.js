@@ -2341,7 +2341,9 @@ async function seedDemoData() {
       }),
     });
     const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data.error || "演示数据生成失败");
+    if (!response.ok || !data.ok) {
+      throw new Error(describeApiError(data, "演示数据生成失败"));
+    }
     invalidateDashboardData();
     await Promise.all([hydrateDashboardData(), loadGoals(), loadCoupons(), loadIntegrationConfigs()]);
     showToast(`演示数据已生成：订单 ${data.seeded.orders}，GA4 ${data.seeded.ga4_daily_rows} 天，广告 ${data.seeded.ad_daily_rows} 条`);
@@ -2364,13 +2366,32 @@ async function clearDemoData() {
       body: JSON.stringify({ action: "clear" }),
     });
     const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data.error || "演示数据清空失败");
+    if (!response.ok || !data.ok) {
+      throw new Error(describeApiError(data, "演示数据清空失败"));
+    }
     invalidateDashboardData();
     await Promise.all([hydrateDashboardData(), loadGoals(), loadCoupons(), loadIntegrationConfigs()]);
     showToast("演示数据已清空。");
   } catch (error) {
     showToast(`清空失败：${error.message}`);
   }
+}
+
+function describeApiError(data, fallback) {
+  const base = String(data?.error || fallback || "请求失败");
+  const details = data?.details;
+  if (!details) return base;
+
+  if (typeof details === "string") return `${base}：${details}`;
+  if (details.message) return `${base}：${details.message}`;
+  if (details.table) {
+    const hint = details.code || details.hint || details.details || "";
+    return `${base}（${details.table}${hint ? ` · ${hint}` : ""}）`;
+  }
+  if (details.code || details.hint || details.details) {
+    return `${base}：${[details.code, details.hint, details.details].filter(Boolean).join(" / ")}`;
+  }
+  return base;
 }
 
 async function loadIntegrationConfigs() {
