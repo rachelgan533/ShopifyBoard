@@ -24,10 +24,10 @@ module.exports = async function handler(req, res) {
       audienceRows,
     ] = await Promise.all([
       supabaseFetch(
-        `/rest/v1/orders?select=id,customer_id,total_price,subtotal_price,total_refunded,created_at,source_name,customer_country,customer_province,customer_city,discount_codes&created_at=gte.${encodeURIComponent(range.startIso)}&created_at=lte.${encodeURIComponent(range.endIso)}&limit=20000`,
+        `/rest/v1/orders?select=id,customer_id,total_price,subtotal_price,total_refunded,created_at,source_name,customer_country,customer_province,customer_city,discount_codes,landing_site,referring_site,raw&created_at=gte.${encodeURIComponent(range.startIso)}&created_at=lte.${encodeURIComponent(range.endIso)}&limit=20000`,
       ),
       supabaseFetch(
-        `/rest/v1/orders?select=id,customer_id,total_price,subtotal_price,total_refunded,created_at,source_name,customer_country,customer_province,customer_city,discount_codes&created_at=gte.${encodeURIComponent(previousRange.startIso)}&created_at=lte.${encodeURIComponent(previousRange.endIso)}&limit=20000`,
+        `/rest/v1/orders?select=id,customer_id,total_price,subtotal_price,total_refunded,created_at,source_name,customer_country,customer_province,customer_city,discount_codes,landing_site,referring_site,raw&created_at=gte.${encodeURIComponent(previousRange.startIso)}&created_at=lte.${encodeURIComponent(previousRange.endIso)}&limit=20000`,
       ),
       supabaseFetch("/rest/v1/order_line_items?select=order_id,title,sku,quantity,price&limit=30000"),
       supabaseFetch("/rest/v1/coupon_codes?select=code,category,owner,status&limit=10000"),
@@ -79,6 +79,8 @@ module.exports = async function handler(req, res) {
     const referral = buildReferralData(orderRows, couponRows);
     const previousReferral = buildReferralData(previousOrderRows, couponRows);
     const channelSales = buildChannelSales(orderRows);
+    const attribution = buildAttributionData(orderRows, couponRows);
+    const previousAttribution = buildAttributionData(previousOrderRows, couponRows);
     const ga4Funnel = buildGa4Funnel(ga4Rows);
     const previousGa4Funnel = buildGa4Funnel(previousGa4Rows);
     const ga4Daily = buildGa4Daily(ga4Rows);
@@ -108,6 +110,7 @@ module.exports = async function handler(req, res) {
       coupon_usage: couponUsage,
       referral,
       channel_sales: channelSales,
+      attribution,
       ga4_funnel: ga4Funnel,
       ga4_daily: ga4Daily,
       ad_performance: adPerformance,
@@ -120,6 +123,7 @@ module.exports = async function handler(req, res) {
         customer_coupon_segments: previousCustomerCouponSegments,
         customer_quality: previousCustomerQuality.summary,
         referral: previousReferral,
+        attribution: previousAttribution,
         ga4_funnel: previousGa4Funnel,
         ad_performance: previousAdPerformance,
       },
@@ -885,6 +889,282 @@ function buildChannelSales(rows) {
       aov: round(item.orders ? item.revenue / item.orders : 0),
     }))
     .sort((a, b) => b.revenue - a.revenue);
+}
+
+function buildAttributionData(orderRows, couponRows) {
+  const couponMeta = new Map();
+  couponRows.forEach((row) => {
+    const code = String(row.code || "").trim();
+    if (!code) return;
+    couponMeta.set(code.toLowerCase(), {
+      category: String(row.category || "").trim(),
+      owner: String(row.owner || "").trim(),
+    });
+  });
+
+  const channelBuckets = new Map();
+  const kolBuckets = new Map();
+  const affiliateBuckets = new Map();
+  const daily = new Map();
+  const summary = {
+    orders: 0,
+    attributed_orders: 0,
+    revenue: 0,
+    customers: new Set(),
+    days_to_conversion_total: 0,
+    days_to_conversion_count: 0,
+  };
+  const quality = {
+    ready_orders: 0,
+    pending_orders: 0,
+    fallback_orders: 0,
+    unknown_orders: 0,
+  };
+
+  orderRows.forEach((row) => {
+    const snapshot = deriveOrderAttribution(row, couponMeta);
+    const revenue = number(row.total_price);
+    const customerId = row.customer_id || null;
+    summary.orders += 1;
+    summary.revenue += revenue;
+    if (customerId) summary.customers.add(customerId);
+    if (snapshot.days_to_conversion !== null && snapshot.days_to_conversion !== undefined) {
+      summary.days_to_conversion_total += snapshot.days_to_conversion;
+      summary.days_to_conversion_count += 1;
+    }
+
+    if (snapshot.ready) quality.ready_orders += 1;
+    else quality.pending_orders += 1;
+    if (snapshot.used_fallback) quality.fallback_orders += 1;
+    if (snapshot.channel === "unknown") quality.unknown_orders += 1;
+    else summary.attributed_orders += 1;
+
+    const key = `${snapshot.channel}::${snapshot.subchannel || ""}`;
+    if (!channelBuckets.has(key)) {
+      channelBuckets.set(key, {
+        channel: snapshot.channel,
+        subchannel: snapshot.subchannel || "—",
+        channel_rule: snapshot.channel_rule,
+        orders: 0,
+        revenue: 0,
+        customers: new Set(),
+      });
+    }
+    const bucket = channelBuckets.get(key);
+    bucket.orders += 1;
+    bucket.revenue += revenue;
+    if (customerId) bucket.customers.add(customerId);
+
+    const day = toDateOnly(row.created_at || new Date());
+    if (!daily.has(day)) {
+      daily.set(day, {
+        day,
+        direct: 0,
+        organic: 0,
+        ads: 0,
+        edm: 0,
+        community: 0,
+        sns: 0,
+        pr: 0,
+        kol: 0,
+        affiliate: 0,
+        other: 0,
+      });
+    }
+    const dayBucket = daily.get(day);
+    if (Object.prototype.hasOwnProperty.call(dayBucket, snapshot.channel)) {
+      dayBucket[snapshot.channel] += 1;
+    } else {
+      dayBucket.other += 1;
+    }
+
+    if (snapshot.channel === "kol") {
+      const owner = snapshot.owner || snapshot.referral_code || snapshot.utm_campaign || "未归属达人";
+      if (!kolBuckets.has(owner)) kolBuckets.set(owner, { owner, orders: 0, revenue: 0 });
+      const kol = kolBuckets.get(owner);
+      kol.orders += 1;
+      kol.revenue += revenue;
+    }
+
+    if (snapshot.channel === "affiliate") {
+      const owner = snapshot.owner || snapshot.referral_code || snapshot.utm_source || "未归属联盟";
+      if (!affiliateBuckets.has(owner)) affiliateBuckets.set(owner, { owner, orders: 0, revenue: 0 });
+      const affiliate = affiliateBuckets.get(owner);
+      affiliate.orders += 1;
+      affiliate.revenue += revenue;
+    }
+  });
+
+  const totalOrders = summary.orders || 1;
+  const totalRevenue = summary.revenue || 1;
+
+  const channels = Array.from(channelBuckets.values())
+    .map((row) => ({
+      channel: row.channel,
+      subchannel: row.subchannel,
+      channel_rule: row.channel_rule,
+      orders: row.orders,
+      revenue: round(row.revenue),
+      customers: row.customers.size,
+      aov: round(row.orders ? row.revenue / row.orders : 0),
+      order_share: round((row.orders / totalOrders) * 100),
+      revenue_share: round((row.revenue / totalRevenue) * 100),
+    }))
+    .sort((a, b) => b.revenue - a.revenue);
+
+  return {
+    summary: {
+      orders: summary.orders,
+      attributed_orders: summary.attributed_orders,
+      revenue: round(summary.revenue),
+      customers: summary.customers.size,
+      attributed_order_rate: round((summary.attributed_orders / totalOrders) * 100),
+      avg_days_to_conversion: round(summary.days_to_conversion_count ? summary.days_to_conversion_total / summary.days_to_conversion_count : 0),
+    },
+    quality,
+    channels,
+    daily: Array.from(daily.values()).sort((a, b) => a.day.localeCompare(b.day)),
+    top_kol: finalizeAttributionOwners(kolBuckets, totalOrders),
+    top_affiliate: finalizeAttributionOwners(affiliateBuckets, totalOrders),
+  };
+}
+
+function finalizeAttributionOwners(map, totalOrders) {
+  return Array.from(map.values())
+    .map((row) => ({
+      owner: row.owner,
+      orders: row.orders,
+      revenue: round(row.revenue),
+      order_share: round((row.orders / (totalOrders || 1)) * 100),
+    }))
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 10);
+}
+
+function deriveOrderAttribution(row, couponMeta) {
+  const raw = row.raw && typeof row.raw === "object" ? row.raw : {};
+  const journey = raw.customerJourneySummary || {};
+  const visit = journey.lastVisit || null;
+  const utm = visit?.utmParameters || {};
+  const rawCodes = Array.isArray(row.discount_codes) ? row.discount_codes : [];
+  const discountCodes = rawCodes.map((code) => String(code || "").trim()).filter(Boolean);
+  const matchedCoupon = discountCodes
+    .map((code) => ({ code, meta: couponMeta.get(code.toLowerCase()) }))
+    .find((item) => item.meta);
+
+  const source = String(visit?.source || row.source_name || "").trim();
+  const sourceDescription = String(visit?.sourceDescription || "").trim();
+  const sourceType = String(visit?.sourceType || "").trim();
+  const referrerUrl = String(visit?.referrerUrl || row.referring_site || "").trim();
+  const landingPage = String(visit?.landingPage || row.landing_site || "").trim();
+  const referralCode = String(visit?.referralCode || "").trim();
+  const utmSource = String(utm.source || "").trim();
+  const utmMedium = String(utm.medium || "").trim();
+  const utmCampaign = String(utm.campaign || "").trim();
+  const utmContent = String(utm.content || "").trim();
+  const utmTerm = String(utm.term || "").trim();
+  const owner = matchedCoupon?.meta?.owner || "";
+  const category = matchedCoupon?.meta?.category || "";
+
+  const classification = classifyAttribution({
+    source,
+    source_description: sourceDescription,
+    source_type: sourceType,
+    referrer_url: referrerUrl,
+    landing_page: landingPage,
+    referral_code: referralCode,
+    utm_source: utmSource,
+    utm_medium: utmMedium,
+    utm_campaign: utmCampaign,
+    utm_content: utmContent,
+    utm_term: utmTerm,
+    discount_codes: discountCodes,
+    coupon_category: category,
+    coupon_owner: owner,
+  });
+
+  return {
+    ready: Boolean(journey.ready),
+    used_fallback: !visit,
+    days_to_conversion: typeof journey.daysToConversion === "number" ? journey.daysToConversion : null,
+    channel: classification.channel,
+    subchannel: classification.subchannel,
+    channel_rule: classification.rule,
+    owner,
+    referral_code: referralCode,
+    utm_source: utmSource,
+    utm_campaign: utmCampaign,
+  };
+}
+
+function classifyAttribution(snapshot) {
+  const source = String(snapshot.source || "").toLowerCase();
+  const sourceDescription = String(snapshot.source_description || "").toLowerCase();
+  const sourceType = String(snapshot.source_type || "").toLowerCase();
+  const referrerUrl = String(snapshot.referrer_url || "").toLowerCase();
+  const landingPage = String(snapshot.landing_page || "").toLowerCase();
+  const utmSource = String(snapshot.utm_source || "").toLowerCase();
+  const utmMedium = String(snapshot.utm_medium || "").toLowerCase();
+  const utmCampaign = String(snapshot.utm_campaign || "").toLowerCase();
+  const referralCode = String(snapshot.referral_code || "").toLowerCase();
+  const couponCategory = String(snapshot.coupon_category || "").toLowerCase();
+  const couponOwner = String(snapshot.coupon_owner || "").toLowerCase();
+  const codePool = [...(snapshot.discount_codes || []).map((code) => String(code || "").toLowerCase()), referralCode].filter(Boolean);
+
+  if (couponCategory.includes("联盟") || /(impact|shareasale|partnerize|rakuten|goaffpro|affiliate)/.test([utmSource, utmCampaign, source, sourceDescription, referrerUrl, couponOwner].join(" "))) {
+    return { channel: "affiliate", subchannel: "affiliate_partner", rule: "affiliate_source_or_coupon" };
+  }
+  if (couponCategory.includes("达人") || /(influencer|creator|ambassador|kol)/.test([utmSource, utmCampaign, source, sourceDescription, couponOwner, ...codePool].join(" "))) {
+    return { channel: "kol", subchannel: couponOwner || "influencer_coupon", rule: "kol_coupon_or_utm" };
+  }
+  if (
+    /(cpc|ppc|paid_social|paidsearch|paid search|display|video|shopping|paid)/.test(utmMedium) ||
+    /(google ads|meta ads|facebook ads|instagram ads|tiktok ads)/.test(sourceDescription) ||
+    /(paid_search|paid_social)/.test(sourceType)
+  ) {
+    const subchannel =
+      /(google|bing|search|shopping)/.test([utmSource, source, sourceDescription].join(" "))
+        ? "paid_search"
+        : "paid_social";
+    return { channel: "ads", subchannel, rule: "paid_utm_or_source_type" };
+  }
+  if (/(email|newsletter|edm|klaviyo|mailchimp|shopify_email)/.test([utmMedium, utmSource, source, sourceDescription, referrerUrl].join(" "))) {
+    return { channel: "edm", subchannel: utmSource || source || "email", rule: "email_source" };
+  }
+  if (/(prnewswire|forbes|techcrunch|yahoo|businesswire|globenewswire|press)/.test(referrerUrl)) {
+    return { channel: "pr", subchannel: extractDomain(referrerUrl), rule: "pr_domain" };
+  }
+  if (/(reddit|discord|quora|slack|forum|community|group)/.test([utmSource, source, referrerUrl, landingPage].join(" "))) {
+    return { channel: "community", subchannel: extractDomain(referrerUrl) || source || utmSource || "community", rule: "community_source" };
+  }
+  if (/(facebook|instagram|tiktok|x|twitter|youtube|pinterest|linkedin)/.test([utmSource, source, referrerUrl, sourceDescription].join(" "))) {
+    return { channel: "sns", subchannel: source || utmSource || extractDomain(referrerUrl) || "social", rule: "social_source" };
+  }
+  if (/(google|bing|yahoo|duckduckgo|baidu)/.test([utmSource, source, referrerUrl, sourceDescription].join(" "))) {
+    return { channel: "organic", subchannel: source || utmSource || extractDomain(referrerUrl) || "search", rule: "organic_search_source" };
+  }
+  if (
+    source === "direct" ||
+    source === "unknown" ||
+    (!source && !utmSource && !utmMedium && !referrerUrl && !referralCode)
+  ) {
+    return { channel: "direct", subchannel: "direct", rule: "direct_or_empty" };
+  }
+  return { channel: "unknown", subchannel: source || extractDomain(referrerUrl) || "unknown", rule: "fallback_unknown" };
+}
+
+function extractDomain(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  try {
+    return new URL(text).hostname.replace(/^www\./, "");
+  } catch {
+    return text
+      .replace(/^https?:\/\//, "")
+      .replace(/^android-app:\/\//, "")
+      .split("/")[0]
+      .replace(/^www\./, "");
+  }
 }
 
 function buildGa4Funnel(rows) {

@@ -24,6 +24,30 @@ const SHOPIFY_ORDER_QUERY = `
           sourceName
           landingPageUrl
           discountCodes
+          customerJourneySummary {
+            ready
+            customerOrderIndex
+            daysToConversion
+            lastVisit {
+              occurredAt
+              source
+              sourceDescription
+              sourceType
+              referrerUrl
+              landingPage
+              referralCode
+              utmParameters {
+                source
+                medium
+                campaign
+                content
+                term
+              }
+              marketingEvent {
+                id
+              }
+            }
+          }
           totalPriceSet {
             shopMoney {
               amount
@@ -474,8 +498,8 @@ function mapOrders(shopId, orders) {
       customer_province: order.shippingAddress?.province || address.province,
       customer_city: order.shippingAddress?.city || address.city,
       source_name: order.sourceName,
-      landing_site: order.landingPageUrl,
-      referring_site: null,
+      landing_site: order.customerJourneySummary?.lastVisit?.landingPage || order.landingPageUrl,
+      referring_site: order.customerJourneySummary?.lastVisit?.referrerUrl || null,
       discount_codes: order.discountCodes || [],
       raw: order,
       synced_at: new Date().toISOString(),

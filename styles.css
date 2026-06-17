@@ -806,6 +806,28 @@ tr:last-child td {
   gap: 4px;
 }
 
+.sim-quick-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.sim-quick-btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: #5b6574;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.sim-quick-btn:hover {
+  border-color: rgba(8, 138, 111, 0.35);
+  color: var(--green);
+}
+
 .slider-label {
   font-weight: 700;
   color: #2b3440;
@@ -889,6 +911,27 @@ tr:last-child td {
   margin-top: 18px;
   padding-top: 18px;
   border-top: 1px solid var(--line);
+}
+
+.simulator-breakdown {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.simulator-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #5b6574;
+}
+
+.simulator-breakdown-row strong {
+  color: #2b3440;
+}
+
+.simulator-note {
+  margin-top: 12px;
 }
 
 .mock-card {

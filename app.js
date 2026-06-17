@@ -3,6 +3,7 @@ const routes = {
   "/personas": "personas",
   "/operations": "operations",
   "/marketing": "marketing",
+  "/attribution": "attribution",
   "/customers": "customers",
   "/aarrr": "aarrr",
   "/settings/goals": "goals",
@@ -15,6 +16,7 @@ const pageMeta = {
   personas: ["用户画像", "近 30 天 · 多源真实数据"],
   operations: ["运营数据看板", "近 30 天"],
   marketing: ["营销分析", "近 30 天 · 加载中..."],
+  attribution: ["归因分析", "近 30 天 · Shopify last click"],
   customers: ["客户分析", "近 30 天 · Shopify 真实数据"],
   aarrr: ["AARRR 分析", "近 30 天"],
   goals: ["目标设置", "长期维护经营目标，支持创建、编辑与历史追踪"],
@@ -27,6 +29,7 @@ const navItems = [
   ["/personas", "◎", "用户画像"],
   ["/operations", "▦", "运营数据看板"],
   ["/marketing", "⚐", "营销分析"],
+  ["/attribution", "⌬", "归因分析"],
   ["/customers", "♧", "客户分析"],
   ["/aarrr", "⌁", "AARRR 分析"],
 ];
@@ -214,7 +217,7 @@ function topbar(title, kicker, page) {
 }
 
 function resolveKicker(kicker, page) {
-  if (["northstar", "personas", "operations", "marketing", "customers", "aarrr"].includes(page)) {
+  if (["northstar", "personas", "operations", "marketing", "attribution", "customers", "aarrr"].includes(page)) {
     return `${activeRangeLabel()} · ${kicker.replace(/^近 30 天 · /, "").replace(/^近 30 天/, "").trim().replace(/^·\s*/, "")}`;
   }
   return kicker;
@@ -554,9 +557,23 @@ function computeSimulatorResult(goal) {
   const sessions = Number(simulator?.sessions || 0);
   const cvr = Number(simulator?.cvr || 0);
   const aov = Number(simulator?.aov || 0);
+  const simulatedOrders = sessions * (cvr / 100);
   const forecast = sessions * (cvr / 100) * aov;
-  const gap = Math.max(Number(goal?.target_gmv || 0) - forecast, 0);
-  return { sessions, cvr, aov, forecast, gap };
+  const targetGmv = Number(goal?.target_gmv || 0);
+  const gap = Math.max(targetGmv - forecast, 0);
+  const additionalOrdersNeeded = aov > 0 ? gap / aov : 0;
+  const additionalSessionsNeeded = cvr > 0 && aov > 0 ? gap / ((cvr / 100) * aov) : null;
+  return {
+    sessions,
+    cvr,
+    aov,
+    simulatedOrders,
+    forecast,
+    targetGmv,
+    gap,
+    additionalOrdersNeeded,
+    additionalSessionsNeeded,
+  };
 }
 
 function simulatorSliderConfig(goal, result) {
@@ -573,6 +590,7 @@ function simulatorSliderConfig(goal, result) {
       step: 100,
       value: result.sessions,
       display: formatInteger(result.sessions),
+      quickAdjust: [0.9, 1.05, 1.1],
     },
     cvr: {
       label: "CVR",
@@ -582,6 +600,7 @@ function simulatorSliderConfig(goal, result) {
       step: 0.01,
       value: result.cvr,
       display: `${formatNumber(result.cvr)}%`,
+      quickAdjust: [0.9, 1.05, 1.1],
     },
     aov: {
       label: "AOV",
@@ -591,6 +610,7 @@ function simulatorSliderConfig(goal, result) {
       step: 1,
       value: result.aov,
       display: formatCurrency(result.aov),
+      quickAdjust: [0.9, 1.05, 1.1],
     },
   };
 }
@@ -644,7 +664,15 @@ function renderGrowthSimulator(goal) {
                     style="--fill:${Math.max(0, Math.min(percent, 100)).toFixed(2)}%;"
                     data-sim-key="${key}"
                   />
-                  <div class="slider-value">${config.display}</div>
+                  <div class="sim-quick-actions">
+                    ${config.quickAdjust
+                      .map((multiplier) => {
+                        const percentLabel = `${multiplier > 1 ? "+" : ""}${Math.round((multiplier - 1) * 100)}%`;
+                        return `<button class="sim-quick-btn" type="button" data-sim-adjust="${key}" data-sim-multiplier="${multiplier}">${percentLabel}</button>`;
+                      })
+                      .join("")}
+                  </div>
+                  <div class="slider-value" data-sim-display="${key}">${config.display}</div>
                 </label>
               `;
               },
@@ -654,15 +682,34 @@ function renderGrowthSimulator(goal) {
         <div class="card pad simulator-result">
           <div class="metric-label">模拟结果</div>
           <div class="section-subtitle">Simulation Result</div>
-          <div class="metric-value" style="color:var(--green)">${formatCurrency(result.forecast)}</div>
+          <div class="metric-value" style="color:var(--green)" data-sim-forecast>${formatCurrency(result.forecast)}</div>
           <div class="muted">Sessions × CVR × AOV</div>
+          <div class="simulator-breakdown">
+            <div class="simulator-breakdown-row">
+              <span>模拟订单数</span>
+              <strong data-sim-orders>${formatNumber(result.simulatedOrders)}</strong>
+            </div>
+            <div class="simulator-breakdown-row">
+              <span>模拟 GMV</span>
+              <strong data-sim-forecast-inline>${formatCurrency(result.forecast)}</strong>
+            </div>
+            <div class="simulator-breakdown-row">
+              <span>还差订单</span>
+              <strong data-sim-orders-gap>${formatNumber(result.additionalOrdersNeeded)}</strong>
+            </div>
+            <div class="simulator-breakdown-row">
+              <span>还差 Sessions</span>
+              <strong data-sim-sessions-gap>${result.additionalSessionsNeeded == null ? "先提升 CVR" : formatInteger(result.additionalSessionsNeeded)}</strong>
+            </div>
+          </div>
           <div class="simulator-gap">
             <span>距离目标</span>
-            <strong style="color:${status.amountColor}">${formatCurrency(result.gap)}</strong>
+            <strong style="color:${status.amountColor}" data-sim-gap>${formatCurrency(result.gap)}</strong>
           </div>
-          <div style="margin-top:12px">${pill(status.label, status.color)}</div>
+          <div style="margin-top:12px" data-sim-status>${pill(status.label, status.color)}</div>
+          <div class="muted simulator-note" data-sim-note>${result.cvr <= 0 ? "当前 CVR 为 0，需提升 CVR 才会产生 GMV 预测。" : "拖动左侧参数，右侧结果会实时重新计算。"}</div>
           <div class="progress" style="margin-top:12px">
-            <span style="width:${forecastRatio}%"></span>
+            <span data-sim-progress style="width:${forecastRatio}%"></span>
           </div>
           <button class="ghost-btn simulator-reset" data-action="reset-simulator" style="margin-top:18px">重置为当前能力</button>
         </div>
@@ -675,6 +722,69 @@ function updateGrowthSimulator(goal) {
   const mount = document.querySelector("[data-growth-simulator]");
   if (!mount || !goal) return;
   mount.innerHTML = renderGrowthSimulator(goal);
+}
+
+function refreshGrowthSimulator(goal) {
+  const mount = document.querySelector("[data-growth-simulator]");
+  if (!mount || !goal) return;
+
+  const result = computeSimulatorResult(goal);
+  const sliders = simulatorSliderConfig(goal, result);
+  const rows = [
+    ["sessions", sliders.sessions],
+    ["cvr", sliders.cvr],
+    ["aov", sliders.aov],
+  ];
+  const target = Math.max(Number(goal.target_gmv || 0), 1);
+  const forecastRatio = Math.min((result.forecast / target) * 100, 100);
+  const gapRatio = result.gap / target;
+  const status =
+    gapRatio <= 0.05
+      ? { label: "接近达成", color: "", amountColor: "var(--green)" }
+      : gapRatio <= 0.2
+        ? { label: "仍有差距", color: "orange", amountColor: "var(--orange)" }
+        : { label: "严重偏离", color: "red", amountColor: "var(--red)" };
+
+  rows.forEach(([key, config]) => {
+    const input = mount.querySelector(`[data-sim-key="${key}"]`);
+    const display = mount.querySelector(`[data-sim-display="${key}"]`);
+    if (input) {
+      input.value = String(config.value);
+      const percent = ((Number(config.value) - Number(config.min)) / Math.max(Number(config.max) - Number(config.min), 1)) * 100;
+      input.style.setProperty("--fill", `${Math.max(0, Math.min(percent, 100)).toFixed(2)}%`);
+    }
+    if (display) display.textContent = config.display;
+  });
+
+  const forecastNode = mount.querySelector("[data-sim-forecast]");
+  const forecastInlineNode = mount.querySelector("[data-sim-forecast-inline]");
+  const ordersNode = mount.querySelector("[data-sim-orders]");
+  const ordersGapNode = mount.querySelector("[data-sim-orders-gap]");
+  const sessionsGapNode = mount.querySelector("[data-sim-sessions-gap]");
+  const gapNode = mount.querySelector("[data-sim-gap]");
+  const statusNode = mount.querySelector("[data-sim-status]");
+  const noteNode = mount.querySelector("[data-sim-note]");
+  const progressNode = mount.querySelector("[data-sim-progress]");
+  if (forecastNode) forecastNode.textContent = formatCurrency(result.forecast);
+  if (forecastInlineNode) forecastInlineNode.textContent = formatCurrency(result.forecast);
+  if (ordersNode) ordersNode.textContent = formatNumber(result.simulatedOrders);
+  if (ordersGapNode) ordersGapNode.textContent = formatNumber(result.additionalOrdersNeeded);
+  if (sessionsGapNode) {
+    sessionsGapNode.textContent =
+      result.additionalSessionsNeeded == null ? "先提升 CVR" : formatInteger(result.additionalSessionsNeeded);
+  }
+  if (gapNode) {
+    gapNode.textContent = formatCurrency(result.gap);
+    gapNode.style.color = status.amountColor;
+  }
+  if (statusNode) statusNode.innerHTML = pill(status.label, status.color);
+  if (noteNode) {
+    noteNode.textContent =
+      result.cvr <= 0
+        ? "当前 CVR 为 0，需提升 CVR 才会产生 GMV 预测。"
+        : "拖动左侧参数，右侧结果会实时重新计算。";
+  }
+  if (progressNode) progressNode.style.width = `${forecastRatio}%`;
 }
 
 function northstarPage() {
@@ -963,6 +1073,173 @@ function renderOperationsDashboard(data, cardDelta) {
     </div>
     ${section("商品销量排行", "", "", tableCard("", ["#", "商品", "销量", "销售额"], (data.top_products || []).map((row, index) => [index + 1, escapeHtml(row.title), formatInteger(row.units_sold), formatCurrency(row.revenue)])))}
     ${section("州/省销售分布", "按 Shopify 订单地址聚合", "", provinceRows.length ? stateRevenueBoard(provinceRows) : personaEmptyState("当前时间范围内暂无州/省销售分布"))}
+  `;
+}
+
+function renderAttributionDashboard(data) {
+  const attribution = data.attribution || {};
+  const previousAttribution = data.previous?.attribution || {};
+  const summary = attribution.summary || {};
+  const quality = attribution.quality || {};
+  const channelRows = attribution.channels || [];
+  const topKol = attribution.top_kol || [];
+  const topAffiliate = attribution.top_affiliate || [];
+  const trendRows = attribution.daily || [];
+
+  const overviewCards = [
+    metricCard("归因订单", formatInteger(summary.orders), compareDelta(summary.orders, previousAttribution.summary?.orders), "Shopify"),
+    metricCard("归因销售额", formatCurrency(summary.revenue), compareDelta(summary.revenue, previousAttribution.summary?.revenue), "Shopify"),
+    metricCard("Last Click 就绪", formatInteger(quality.ready_orders), compareDelta(quality.ready_orders, previousAttribution.quality?.ready_orders), "Shopify"),
+    metricCard("回退归因", formatInteger(quality.fallback_orders), compareDelta(quality.fallback_orders, previousAttribution.quality?.fallback_orders), "Shopify"),
+    metricCard("待补归因", formatInteger(quality.pending_orders), compareDelta(quality.pending_orders, previousAttribution.quality?.pending_orders), "Shopify"),
+  ];
+
+  const channelRevenueRows = channelRows.slice(0, 8).map((row) => [prettyChannel(row.channel), Number(row.revenue || 0), formatCurrency(row.revenue)]);
+  const channelOrderRows = channelRows.slice(0, 8).map((row) => [prettyChannel(row.channel), Number(row.order_share || 0), `${formatNumber(row.order_share)}%`]);
+  const trendSeries = [
+    { key: "ads", label: "Ads", color: "#6375d6" },
+    { key: "organic", label: "Organic", color: "#19a186" },
+    { key: "direct", label: "Direct", color: "#00896b" },
+    { key: "kol", label: "KOL", color: "#f59e0b" },
+    { key: "affiliate", label: "Affiliate", color: "#7a55dc" },
+  ].filter((item) => trendRows.some((row) => Number(row[item.key] || 0) > 0));
+
+  return `
+    <div class="grid cols-5">
+      ${overviewCards.join("")}
+    </div>
+    ${section(
+      "归因总览",
+      "以 Shopify last click 为主口径；若 last click 尚未就绪，则回退到订单来源字段。",
+      `${pill("Shopify")} ${pill("Last Click")}`,
+      `<div class="grid cols-3">
+        <div class="card pad">
+          <div class="metric-label">已归因订单占比</div>
+          <div class="metric-value">${formatNumber(summary.attributed_order_rate)}%</div>
+          <div class="small-label">已归因订单 / 当前区间总订单</div>
+        </div>
+        <div class="card pad">
+          <div class="metric-label">Unknown 订单数</div>
+          <div class="metric-value">${formatInteger(quality.unknown_orders)}</div>
+          <div class="small-label">规则未命中的订单</div>
+        </div>
+        <div class="card pad">
+          <div class="metric-label">平均转化周期</div>
+          <div class="metric-value">${formatNumber(summary.avg_days_to_conversion || 0)}</div>
+          <div class="small-label">天</div>
+        </div>
+      </div>`,
+    )}
+    <div class="grid cols-2">
+      ${channelRevenueRows.length ? barChartCard("渠道贡献 · 销售额", channelRevenueRows) : personaEmptyState("当前时间范围内暂无可用的归因销售额")}
+      ${channelOrderRows.length ? barChartCard("渠道贡献 · 订单占比", channelOrderRows, "#6375d6") : personaEmptyState("当前时间范围内暂无可用的归因订单")}
+    </div>
+    ${section(
+      "渠道明细",
+      "一级渠道 + 二级说明，支持 direct / organic / ads / edm / community / sns / pr / kol / affiliate。",
+      "",
+      tableCard(
+        "",
+        ["渠道", "细分", "订单数", "销售额", "客户数", "客单价", "订单占比", "GMV 占比"],
+        (channelRows.length
+          ? channelRows
+          : [{ channel: "unknown", subchannel: "暂无数据", orders: 0, revenue: 0, customers: 0, aov: 0, order_share: 0, revenue_share: 0 }]
+        ).map((row) => [
+          escapeHtml(prettyChannel(row.channel)),
+          escapeHtml(row.subchannel || "—"),
+          formatInteger(row.orders),
+          formatCurrency(row.revenue),
+          formatInteger(row.customers),
+          formatCurrency(row.aov),
+          `${formatNumber(row.order_share)}%`,
+          `${formatNumber(row.revenue_share)}%`,
+        ]),
+      ),
+    )}
+    ${section(
+      "渠道趋势",
+      "当前顶部时间范围内，各一级归因渠道的按日订单趋势。",
+      "",
+      trendSeries.length
+        ? multiLineTrendCard("Last Click 渠道订单趋势", trendRows, trendSeries)
+        : personaEmptyState("当前还没有足够的归因趋势数据"),
+    )}
+    <div class="grid cols-2">
+      ${section(
+        "KOL 排行",
+        "根据 referral code、达人券与 last-click 来源聚合。",
+        pill("KOL"),
+        tableCard(
+          "",
+          ["#", "达人", "订单数", "销售额", "订单占比"],
+          (topKol.length ? topKol : [{ owner: "暂无数据", orders: 0, revenue: 0, order_share: 0 }]).map((row, index) => [
+            String(index + 1),
+            escapeHtml(row.owner),
+            formatInteger(row.orders),
+            formatCurrency(row.revenue),
+            `${formatNumber(row.order_share)}%`,
+          ]),
+        ),
+      )}
+      ${section(
+        "Affiliate 排行",
+        "根据联盟 referral code / partner 来源归类。",
+        pill("Affiliate", "blue"),
+        tableCard(
+          "",
+          ["#", "联盟伙伴", "订单数", "销售额", "订单占比"],
+          (topAffiliate.length ? topAffiliate : [{ owner: "暂无数据", orders: 0, revenue: 0, order_share: 0 }]).map((row, index) => [
+            String(index + 1),
+            escapeHtml(row.owner),
+            formatInteger(row.orders),
+            formatCurrency(row.revenue),
+            `${formatNumber(row.order_share)}%`,
+          ]),
+        ),
+      )}
+    </div>
+    ${section(
+      "归因质量监控",
+      "帮助判断 last-click 就绪度、回退命中率和待补归因订单量。",
+      "",
+      `<div class="grid cols-4">
+        ${simpleMetric("Last Click Ready", formatInteger(quality.ready_orders), compareDelta(quality.ready_orders, previousAttribution.quality?.ready_orders))}
+        ${simpleMetric("Fallback 命中", formatInteger(quality.fallback_orders), compareDelta(quality.fallback_orders, previousAttribution.quality?.fallback_orders))}
+        ${simpleMetric("Pending", formatInteger(quality.pending_orders), compareDelta(quality.pending_orders, previousAttribution.quality?.pending_orders))}
+        ${simpleMetric("Unknown", formatInteger(quality.unknown_orders), compareDelta(quality.unknown_orders, previousAttribution.quality?.unknown_orders))}
+      </div>`,
+    )}
+  `;
+}
+
+function multiLineTrendCard(title, rows, seriesMeta) {
+  const safeRows = rows || [];
+  if (!safeRows.length || !seriesMeta.length) return personaEmptyState(`${title} 暂无真实数据`);
+  const values = safeRows.flatMap((row) => seriesMeta.map((item) => Number(row[item.key] || 0)));
+  const max = Math.max(...values, 0);
+  const min = Math.min(...values, 0);
+  const toCoords = (key) =>
+    safeRows.map((row, index) => [
+      (index / Math.max(safeRows.length - 1, 1)) * 100,
+      56 - ((Number(row[key]) - min) / (max - min || 1)) * 44,
+    ]);
+
+  return `
+    <div class="card pad chart-card line-chart-card">
+      <div class="chart-title">${title}</div>
+      <div class="line-legend">
+        ${seriesMeta.map((item) => `<span><i style="background:${item.color}"></i>${item.label}</span>`).join("")}
+      </div>
+      <svg class="line-chart" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true">
+        <path class="line-grid" d="M0,14 H100 M0,30 H100 M0,46 H100"></path>
+        ${seriesMeta
+          .map(
+            (item) =>
+              `<path class="line-secondary" style="stroke:${item.color}" d="${smoothPath(toCoords(item.key))}"></path>`,
+          )
+          .join("")}
+      </svg>
+    </div>
   `;
 }
 
@@ -1304,6 +1581,10 @@ function marketingPage() {
       ${mockMetric("区域 ROAS", "0.00")}
     </div>${tableCard("", ["地区", "销售额", "ROAS", "区域 CPA"], countryRows.map((r) => [r[0], r[2], "0.00x", "US$0.00"]))}`)}
   `;
+}
+
+function attributionPage() {
+  return `<div data-attribution-content>${personaEmptyState("正在加载归因分析数据…", "将按 Shopify last click 归因，并在缺失时回退到订单来源字段。")}</div>`;
 }
 
 function customersPage() {
@@ -1748,6 +2029,7 @@ function render() {
     personas: personasPage,
     operations: operationsPage,
     marketing: marketingPage,
+    attribution: attributionPage,
     customers: customersPage,
     aarrr: aarrrPage,
     goals: goalsPage,
@@ -1812,6 +2094,23 @@ app.addEventListener("click", (event) => {
     return;
   }
 
+  const simAdjustButton = event.target.closest("[data-sim-adjust]");
+  if (simAdjustButton) {
+    if (!state.dashboardData?.active_goal) return;
+    const simulator = ensureSimulatorState(state.dashboardData.active_goal);
+    const key = simAdjustButton.dataset.simAdjust;
+    const multiplier = Number(simAdjustButton.dataset.simMultiplier || 1);
+    if (!key || !Number.isFinite(multiplier)) return;
+    const current = Number(simulator[key] || 0);
+    const result = computeSimulatorResult(state.dashboardData.active_goal);
+    const config = simulatorSliderConfig(state.dashboardData.active_goal, result)[key];
+    if (!config) return;
+    const nextValue = Math.max(Number(config.min), Math.min(Number(config.max), current * multiplier));
+    simulator[key] = key === "sessions" ? Math.round(nextValue / Number(config.step || 1)) * Number(config.step || 1) : roundTo(nextValue, key === "cvr" ? 2 : 0);
+    refreshGrowthSimulator(state.dashboardData.active_goal);
+    return;
+  }
+
   const actionButton = event.target.closest("[data-action]");
   if (actionButton) {
     handleAction(actionButton.dataset.action, actionButton);
@@ -1838,7 +2137,7 @@ app.addEventListener("input", (event) => {
     if (!state.dashboardData?.active_goal) return;
     const simulator = ensureSimulatorState(state.dashboardData.active_goal);
     simulator[event.target.dataset.simKey] = Number(event.target.value || 0);
-    updateGrowthSimulator(state.dashboardData.active_goal);
+    refreshGrowthSimulator(state.dashboardData.active_goal);
     return;
   }
 
@@ -2625,6 +2924,7 @@ function applyDashboardData(data) {
   const summary = data.summary || {};
   const activeGoal = data.active_goal || null;
   const customerQuality = data.customer_quality || {};
+  const attribution = data.attribution || {};
   const previous = data.previous || {};
   const previousSummary = previous.summary || {};
   const previousCustomerCouponSegments = previous.customer_coupon_segments || [];
@@ -2713,6 +3013,15 @@ function applyDashboardData(data) {
   const operationsContent = document.querySelector("[data-operations-content]");
   if (operationsContent) {
     operationsContent.innerHTML = renderOperationsDashboard(data, cardDelta);
+  }
+
+  const attributionContent = document.querySelector("[data-attribution-content]");
+  if (attributionContent) {
+    attributionContent.innerHTML = renderAttributionDashboard({
+      ...data,
+      attribution,
+      previous,
+    });
   }
 
   const personaOverview = document.querySelector("[data-persona-overview]");
@@ -3601,6 +3910,11 @@ function formatNumber(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(Number(value || 0));
+}
+
+function roundTo(value, digits = 0) {
+  const factor = 10 ** Number(digits || 0);
+  return Math.round(Number(value || 0) * factor) / factor;
 }
 
 function formatDateTime(value) {
