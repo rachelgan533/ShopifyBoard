@@ -176,6 +176,25 @@ function normalizeSourceConfig(source, config) {
     return next;
   }
 
+  if (source === "search_console") {
+    next.site_url = String(next.site_url || "").trim();
+    const lookbackDays = Number(next.lookback_days || 30);
+    next.lookback_days = String(Math.max(1, lookbackDays));
+    if (String(next.auth_mode || "").trim().toLowerCase() === "oauth") {
+      next.google_auth_mode = "Google OAuth";
+    }
+    return next;
+  }
+
+  if (source === "meta_ads") {
+    next.app_id = String(next.app_id || "").trim();
+    next.ad_account_id = String(next.ad_account_id || "").replace(/[^\d]/g, "").trim();
+    const lookbackDays = Number(next.lookback_days || 30);
+    next.lookback_days = String(Math.max(1, lookbackDays));
+    if (next.access_token) next.auth_mode = "manual_token";
+    return next;
+  }
+
   return next;
 }
 

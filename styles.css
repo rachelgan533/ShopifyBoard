@@ -424,6 +424,10 @@ button {
   gap: 18px;
 }
 
+.grid > * {
+  min-width: 0;
+}
+
 .cols-2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -438,6 +442,10 @@ button {
 
 .cols-5 {
   grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.metric-grid-auto {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 }
 
 .card {
@@ -554,6 +562,8 @@ button {
 
 .line-chart-card {
   min-height: 320px;
+  position: relative;
+  overflow: hidden;
 }
 
 .line-legend {
@@ -593,9 +603,10 @@ button {
 .line-primary,
 .line-secondary {
   fill: none;
-  stroke-width: 1.5;
+  stroke-width: 1.15;
   stroke-linecap: round;
   stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
 }
 
 .line-primary {
@@ -604,6 +615,62 @@ button {
 
 .line-secondary {
   stroke: #6375d6;
+}
+
+.line-chart-guide {
+  position: absolute;
+  top: 56px;
+  bottom: 20px;
+  width: 1px;
+  background: rgba(99, 117, 214, 0.2);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-0.5px);
+}
+
+.line-chart-tooltip {
+  position: absolute;
+  top: 72px;
+  left: 0;
+  transform: translateX(-50%);
+  min-width: 132px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(17, 24, 39, 0.96);
+  color: #fff;
+  font-size: 12px;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.22);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  display: grid;
+  gap: 4px;
+  z-index: 4;
+}
+
+.line-chart-tooltip strong {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.line-chart-tooltip-row {
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.line-chart-tooltip-row i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.line-chart-tooltip-row b,
+.line-chart-tooltip-row em {
+  font-style: normal;
+  font-weight: 700;
 }
 
 .donut-wrap {
@@ -1109,6 +1176,22 @@ tr:last-child td {
   resize: vertical;
   line-height: 1.5;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+
+.integration-hint {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--muted);
+  display: grid;
+  gap: 4px;
+}
+
+.integration-hint strong {
+  color: var(--text);
   font-size: 12px;
 }
 

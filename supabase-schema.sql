@@ -217,6 +217,23 @@ create table if not exists audience_segments (
   unique (shop_id, source, segment_type, segment_name, day)
 );
 
+create table if not exists search_console_metrics (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid references shops(id) on delete cascade,
+  site_url text not null,
+  day date not null,
+  dimension_type text not null,
+  dimension_value text not null default 'all',
+  clicks numeric default 0,
+  impressions numeric default 0,
+  ctr numeric default 0,
+  position numeric default 0,
+  raw jsonb default '{}'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique (shop_id, site_url, day, dimension_type, dimension_value)
+);
+
 create index if not exists idx_orders_shop_created_at on orders(shop_id, created_at desc);
 create index if not exists idx_orders_shop_customer on orders(shop_id, customer_id);
 create index if not exists idx_orders_country on orders(shop_id, customer_country);
@@ -227,6 +244,7 @@ create index if not exists idx_coupons_shop_code on coupon_codes(shop_id, code);
 create index if not exists idx_ga4_day on ga4_daily_metrics(shop_id, day desc);
 create index if not exists idx_ads_day on ad_daily_metrics(shop_id, source, day desc);
 create index if not exists idx_audience_segments on audience_segments(shop_id, source, segment_type, day desc);
+create index if not exists idx_search_console_day on search_console_metrics(shop_id, day desc, dimension_type);
 
 drop trigger if exists trg_shops_updated_at on shops;
 create trigger trg_shops_updated_at before update on shops
@@ -246,6 +264,10 @@ for each row execute function set_updated_at();
 
 drop trigger if exists trg_goals_updated_at on goals;
 create trigger trg_goals_updated_at before update on goals
+for each row execute function set_updated_at();
+
+drop trigger if exists trg_search_console_metrics_updated_at on search_console_metrics;
+create trigger trg_search_console_metrics_updated_at before update on search_console_metrics
 for each row execute function set_updated_at();
 
 create or replace view dashboard_daily_sales as

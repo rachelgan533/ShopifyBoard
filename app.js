@@ -20,7 +20,7 @@ const pageMeta = {
   customers: ["客户分析", "近 30 天 · Shopify 真实数据"],
   aarrr: ["AARRR 分析", "近 30 天"],
   goals: ["目标设置", "长期维护经营目标，支持创建、编辑与历史追踪"],
-  integration: ["集成设置", "管理 Shopify、GA4、Meta Ads 等数据源连接与同步"],
+  integration: ["集成设置", "管理 Shopify、GA4、Search Console、Meta Ads 等数据源连接与同步"],
   coupons: ["优惠券设置", "管理券码分类：新人券、站内活动券、达人券"],
 };
 
@@ -1064,7 +1064,7 @@ function renderOperationsDashboard(data, cardDelta) {
       ${deviceRows.length ? progressDistributionCard("访问设备明细", deviceRows.map(([label, value]) => [label, value, value]), formatInteger, pill("GA4")) : personaEmptyState("访问设备明细暂无真实数据")}
     </div>
     ${section("高价值客户", "按当前时间范围内客户销售额排序", "", topCustomerRows.length ? tableCard("", ["客户", "邮箱", "销售额", "件数", "最近下单"], topCustomerRows) : personaEmptyState("当前时间范围内暂无高价值客户数据"))}
-    ${section("销售趋势", "", "", dualLineChartCard("GMV vs 商品总额", daily.map((row) => ({ label: row.day, value: row.gmv })), daily.map((row) => ({ label: row.day, value: row.gross_sales })), "销售额", "商品总额"))}
+    ${section("销售趋势", "", "", dualLineChartCard("GMV vs 商品总额", daily.map((row) => ({ label: row.day, value: row.gmv })), daily.map((row) => ({ label: row.day, value: row.gross_sales })), "销售额", "商品总额", "currency"))}
     <div class="grid cols-2">
       ${channelVisitors.length ? barChartCard("访客渠道来源", channelVisitors, "var(--green)") : personaEmptyState("GA4 暂无渠道访客数据")}
       ${channelConversionRows.length
@@ -1105,7 +1105,7 @@ function renderAttributionDashboard(data) {
   ].filter((item) => trendRows.some((row) => Number(row[item.key] || 0) > 0));
 
   return `
-    <div class="grid cols-5">
+    <div class="grid cols-5 metric-grid-auto">
       ${overviewCards.join("")}
     </div>
     ${section(
@@ -1224,8 +1224,18 @@ function multiLineTrendCard(title, rows, seriesMeta) {
       56 - ((Number(row[key]) - min) / (max - min || 1)) * 44,
     ]);
 
+  const tooltipPayload = safeRows.map((row) => ({
+    label: row.day || row.label || "",
+    values: seriesMeta.map((item) => ({
+      label: item.label,
+      color: item.color,
+      value: Number(row[item.key] || 0),
+      format: "integer",
+    })),
+  }));
+
   return `
-    <div class="card pad chart-card line-chart-card">
+    <div class="card pad chart-card line-chart-card line-chart-interactive" data-line-chart="${escapeAttr(JSON.stringify(tooltipPayload))}">
       <div class="chart-title">${title}</div>
       <div class="line-legend">
         ${seriesMeta.map((item) => `<span><i style="background:${item.color}"></i>${item.label}</span>`).join("")}
@@ -1239,6 +1249,8 @@ function multiLineTrendCard(title, rows, seriesMeta) {
           )
           .join("")}
       </svg>
+      <div class="line-chart-guide" aria-hidden="true"></div>
+      <div class="line-chart-tooltip" aria-hidden="true"></div>
     </div>
   `;
 }
@@ -1248,7 +1260,14 @@ function simpleMetric(label, value, delta) {
   return `<div class="card pad"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="delta ${down ? "down" : ""}">${down ? "↘" : "↗"} ${delta}</div></div>`;
 }
 
-function dualLineChartCard(title, primarySeries, secondarySeries, primaryLabel, secondaryLabel) {
+function dualLineChartCard(
+  title,
+  primarySeries,
+  secondarySeries,
+  primaryLabel,
+  secondaryLabel,
+  valueFormat = "number",
+) {
   const points = primarySeries.map((row, index) => ({
     label: row.label,
     primary: Number(row.value || 0),
@@ -1265,8 +1284,16 @@ function dualLineChartCard(title, primarySeries, secondarySeries, primaryLabel, 
       56 - ((Number(row[key]) - min) / (max - min || 1)) * 44,
     ]);
 
+  const tooltipPayload = points.map((row) => ({
+    label: row.label,
+    values: [
+      { label: primaryLabel, color: "#00896b", value: row.primary, format: valueFormat },
+      { label: secondaryLabel, color: "#6375d6", value: row.secondary, format: valueFormat },
+    ],
+  }));
+
   return `
-    <div class="card pad chart-card line-chart-card">
+    <div class="card pad chart-card line-chart-card line-chart-interactive" data-line-chart="${escapeAttr(JSON.stringify(tooltipPayload))}">
       <div class="chart-title">${title}</div>
       <div class="line-legend">
         <span><i style="background:#00896b"></i>${primaryLabel}</span>
@@ -1277,6 +1304,8 @@ function dualLineChartCard(title, primarySeries, secondarySeries, primaryLabel, 
         <path class="line-primary" d="${smoothPath(toCoords("primary"))}"></path>
         <path class="line-secondary" d="${smoothPath(toCoords("secondary"))}"></path>
       </svg>
+      <div class="line-chart-guide" aria-hidden="true"></div>
+      <div class="line-chart-tooltip" aria-hidden="true"></div>
     </div>
   `;
 }
@@ -1847,6 +1876,17 @@ function integrationPage() {
       ],
     },
     {
+      source: "search_console",
+      icon: "C",
+      title: "Google Search Console",
+      subtitle: "Search Console · Google OAuth",
+      status: "未连接",
+      fields: [
+        ["site_url", "Site URL · 资源地址（sc-domain:example.com 或 https://www.example.com/）", ""],
+        ["lookback_days", "回溯天数 · 每次同步最近多少天", "30"],
+      ],
+    },
+    {
       source: "google_ads",
       icon: "A",
       title: "Google Ads",
@@ -1868,15 +1908,17 @@ function integrationPage() {
       status: "未连接",
       fields: [
         ["app_id", "App ID · Meta 应用 ID", ""],
+        ["app_secret", "App Secret · 仅服务端保存（可选，但建议）", ""],
         ["ad_account_id", "Ad Account ID · 广告账户 ID", ""],
         ["access_token", "Access Token · 仅服务端保存", ""],
+        ["lookback_days", "回溯天数 · 每次同步最近多少天", "30"],
         ["sync_interval", "同步频率", "每 1 小时"],
       ],
     },
   ];
   return `
     <div class="grid cols-3" style="max-width:900px;margin:0 auto 24px">
-      <div class="card pad"><div class="muted">集成总数</div><div class="metric-value" data-integration-summary="total">4</div></div>
+      <div class="card pad"><div class="muted">集成总数</div><div class="metric-value" data-integration-summary="total">5</div></div>
       <div class="card pad"><div class="muted">已连接</div><div class="metric-value" style="color:var(--green)" data-integration-summary="connected">0</div></div>
       <div class="card pad"><div class="muted">连接异常</div><div class="metric-value" style="color:var(--red)" data-integration-summary="issues">0</div></div>
     </div>
@@ -1898,7 +1940,7 @@ function integrationPage() {
             <div class="card settings-card" data-integration-card="${source}">
               <div class="metric-head">
                 <div style="display:flex;gap:14px;align-items:center">
-                  <span class="source-icon" style="width:36px;height:36px;border-radius:7px;background:${icon === "G" ? "#f59e0b" : icon === "A" ? "#4f80ff" : icon === "M" ? "#3478f6" : "var(--green)"};color:#fff;font-weight:850">${icon}</span>
+                  <span class="source-icon" style="width:36px;height:36px;border-radius:7px;background:${icon === "G" ? "#f59e0b" : icon === "C" ? "#2563eb" : icon === "A" ? "#4f80ff" : icon === "M" ? "#3478f6" : "var(--green)"};color:#fff;font-weight:850">${icon}</span>
                   <div><div class="section-title" style="font-size:18px">${title}</div><div class="muted">${subtitle}</div></div>
                 </div>
                 <span class="status ${status === "未连接" ? "gray" : ""}" data-integration-status>${status}</span>
@@ -1910,12 +1952,12 @@ function integrationPage() {
                   <div class="metric-label" data-integration-field="status_text">未连接</div>
                 </div>
                 <div class="card pad">
-                  <div class="muted">${["ga4", "google_ads"].includes(source) ? "Google Account · 授权 Google 账号" : "Last Connected · 最近连接"}</div>
-                  <div class="metric-label" data-integration-field="${["ga4", "google_ads"].includes(source) ? "account_identity" : "last_connected_at"}">${["ga4", "google_ads"].includes(source) ? "未绑定" : "—"}</div>
+                  <div class="muted">${["ga4", "google_ads", "search_console"].includes(source) ? "Google Account · 授权 Google 账号" : "Last Connected · 最近连接"}</div>
+                  <div class="metric-label" data-integration-field="${["ga4", "google_ads", "search_console"].includes(source) ? "account_identity" : "last_connected_at"}">${["ga4", "google_ads", "search_console"].includes(source) ? "未绑定" : "—"}</div>
                 </div>
                 <div class="card pad">
-                  <div class="muted">${["ga4", "google_ads"].includes(source) ? "Auth Mode · 授权方式" : "Last Tested · 最近测试"}</div>
-                  <div class="metric-label" data-integration-field="${["ga4", "google_ads"].includes(source) ? "project_identity" : "last_tested_at"}">${["ga4", "google_ads"].includes(source) ? "Google OAuth" : "—"}</div>
+                  <div class="muted">${["ga4", "google_ads", "search_console"].includes(source) ? "Auth Mode · 授权方式" : "Last Tested · 最近测试"}</div>
+                  <div class="metric-label" data-integration-field="${["ga4", "google_ads", "search_console"].includes(source) ? "project_identity" : "last_tested_at"}">${["ga4", "google_ads", "search_console"].includes(source) ? "Google OAuth" : "—"}</div>
                 </div>
                 <div class="card pad">
                   <div class="muted">Last Sync Time · 最近同步</div>
@@ -1936,10 +1978,33 @@ function integrationPage() {
                   `)
                   .join("")}
               </div>
+              ${
+                source === "google_ads"
+                  ? `<div class="integration-hint">
+                      <strong>接通流程</strong>
+                      <span>先填写 Customer ID、Developer Token，可选填 Login Customer ID（MCC）。保存后点击“连接 Google”，再做“测试连接”和“手动同步”。</span>
+                    </div>`
+                  : source === "ga4"
+                    ? `<div class="integration-hint">
+                        <strong>接通流程</strong>
+                        <span>先填写 GA4 媒体资源 ID，保存后点击“连接 Google”，授权完成后再测试连接并同步。</span>
+                      </div>`
+                    : source === "meta_ads"
+                      ? `<div class="integration-hint">
+                          <strong>接通流程</strong>
+                          <span>先填写 Meta App ID、Ad Account ID 和长期可用的 System User Token。保存后先测试连接，再手动同步广告与受众分群数据。</span>
+                        </div>`
+                    : source === "search_console"
+                      ? `<div class="integration-hint">
+                          <strong>接通流程</strong>
+                          <span>先填写 Search Console 的 Site URL，保存后点击“连接 Google”，授权完成后再测试连接并同步点击、展示、CTR 与排名数据。</span>
+                        </div>`
+                    : ""
+              }
               <div class="button-row">
                 <button class="ghost-btn" data-action="disconnect-source">断开连接</button>
                 <button class="ghost-btn" data-action="save-source" data-source="${source}">保存配置</button>
-                ${["ga4", "google_ads"].includes(source) ? `<button class="ghost-btn" data-action="connect-google" data-source="${source}">连接 Google</button>` : ""}
+                ${["ga4", "google_ads", "search_console"].includes(source) ? `<button class="ghost-btn" data-action="connect-google" data-source="${source}">连接 Google</button>` : ""}
                 <button class="ghost-btn" data-action="test-source" data-source="${source}">测试连接</button>
                 <button class="primary-btn" data-action="manual-sync" data-source="${source}">手动同步</button>
               </div>
@@ -2210,7 +2275,9 @@ async function handleAction(action, button) {
     await saveIntegration(button);
     if (button?.dataset.source === "shopify") await runShopifySync("test");
     if (button?.dataset.source === "ga4") await runGa4Sync("test");
+    if (button?.dataset.source === "search_console") await runSearchConsoleSync("test");
     if (button?.dataset.source === "google_ads") await runGoogleAdsSync("test");
+    if (button?.dataset.source === "meta_ads") await runMetaAdsSync("test");
     return;
   }
 
@@ -2224,10 +2291,14 @@ async function handleAction(action, button) {
       await runShopifySync();
     } else if (button?.dataset.source === "ga4") {
       await runGa4Sync();
+    } else if (button?.dataset.source === "search_console") {
+      await runSearchConsoleSync();
     } else if (button?.dataset.source === "google_ads") {
       await runGoogleAdsSync();
+    } else if (button?.dataset.source === "meta_ads") {
+      await runMetaAdsSync();
     } else {
-      showToast("这个数据源的同步接口还没接入，当前先接通 Shopify、GA4 和 Google Ads。");
+      showToast("这个数据源的同步接口还没接入，当前先接通 Shopify、GA4、Search Console、Google Ads 和 Meta Ads。");
     }
     return;
   }
@@ -2465,8 +2536,8 @@ async function saveIntegration(button) {
       },
       body: JSON.stringify({
         source,
-        config: ["ga4", "google_ads"].includes(source) ? { ...config, auth_mode: "oauth" } : config,
-        status: ["ga4", "google_ads"].includes(source) ? "configured" : "connected",
+        config: ["ga4", "google_ads", "search_console"].includes(source) ? { ...config, auth_mode: "oauth" } : source === "meta_ads" ? { ...config, auth_mode: "manual_token" } : config,
+        status: ["ga4", "google_ads", "search_console", "meta_ads"].includes(source) ? "configured" : "connected",
       }),
     });
     const data = await response.json();
@@ -2500,8 +2571,12 @@ async function disconnectSource(button) {
         clear_keys:
           source === "ga4"
             ? ["refresh_token", "google_account_email", "google_project_id", "google_auth_mode", "service_account_json", "auth_mode"]
+            : source === "search_console"
+              ? ["refresh_token", "google_account_email", "google_auth_mode", "site_url", "lookback_days", "auth_mode"]
             : source === "google_ads"
               ? ["refresh_token", "google_account_email", "google_auth_mode", "customer_name", "auth_mode"]
+              : source === "meta_ads"
+                ? ["app_id", "app_secret", "ad_account_id", "access_token", "lookback_days", "sync_interval", "account_name", "account_currency", "auth_mode"]
               : [],
       }),
     });
@@ -2582,6 +2657,28 @@ async function runGa4Sync(mode = "sync") {
   }
 }
 
+async function runSearchConsoleSync(mode = "sync") {
+  if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
+
+  showToast(mode === "test" ? "正在测试 Search Console 连接..." : "正在同步 Search Console 数据...");
+  try {
+    const suffix = mode === "test" ? "&mode=test" : "";
+    const response = await fetch(`/api/sync/search-console?secret=${encodeURIComponent(state.integrationSecret)}${suffix}`);
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Search Console 同步失败");
+    await loadIntegrationConfigs();
+    if (mode === "test") {
+      showToast(`Search Console 连接测试通过：${data.site_url}`);
+      return;
+    }
+    state.dashboardData = null;
+    await hydrateDashboardData();
+    showToast(`Search Console 同步完成：${data.synced_rows} 条搜索分析数据`);
+  } catch (error) {
+    showToast(`Search Console 操作失败：${error.message}`);
+  }
+}
+
 async function runGoogleAdsSync(mode = "sync") {
   if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
 
@@ -2601,6 +2698,28 @@ async function runGoogleAdsSync(mode = "sync") {
     showToast(`Google Ads 同步完成：${data.synced_rows} 条日广告数据`);
   } catch (error) {
     showToast(`Google Ads 操作失败：${error.message}`);
+  }
+}
+
+async function runMetaAdsSync(mode = "sync") {
+  if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
+
+  showToast(mode === "test" ? "正在测试 Meta Ads 连接..." : "正在同步 Meta Ads 数据...");
+  try {
+    const suffix = mode === "test" ? "&mode=test" : "";
+    const response = await fetch(`/api/sync/meta-ads?secret=${encodeURIComponent(state.integrationSecret)}${suffix}`);
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Meta Ads 同步失败");
+    await loadIntegrationConfigs();
+    if (mode === "test") {
+      showToast(`Meta Ads 连接测试通过：${data.account_name || data.ad_account_id}`);
+      return;
+    }
+    state.dashboardData = null;
+    await hydrateDashboardData();
+    showToast(`Meta Ads 同步完成：广告 ${data.synced_rows} 条，分群 ${data.synced_segment_rows} 条`);
+  } catch (error) {
+    showToast(`Meta Ads 操作失败：${error.message}`);
   }
 }
 
@@ -2703,7 +2822,7 @@ async function loadIntegrationConfigs() {
     const integrations = dedupeIntegrationsBySource(data.integrations || []);
     const connectedCount = integrations.filter((item) => item.status === "connected").length;
     const issueCount = integrations.filter((item) => item.status && item.status !== "connected" && item.status !== "disconnected").length;
-    updateIntegrationSummary("total", 4);
+    updateIntegrationSummary("total", 5);
     updateIntegrationSummary("connected", connectedCount);
     updateIntegrationSummary("issues", issueCount);
 
@@ -2753,6 +2872,38 @@ async function loadIntegrationConfigs() {
           card,
           "project_identity",
           item.config?.customer_name || item.config?.customer_id || "Google Ads 账号",
+        );
+      }
+      if (item.source === "search_console") {
+        updateIntegrationField(
+          card,
+          "account_identity",
+          item.config?.google_account_email
+            ? `已绑定（${item.config.google_account_email}）`
+            : item.status === "connected"
+              ? "已连接（邮箱未记录）"
+              : "未绑定",
+        );
+        updateIntegrationField(
+          card,
+          "project_identity",
+          item.config?.site_url || "Search Console 资源",
+        );
+      }
+      if (item.source === "meta_ads") {
+        updateIntegrationField(
+          card,
+          "last_connected_at",
+          item.config?.account_name
+            ? `${item.config.account_name}${item.last_connected_at ? ` · ${formatMaybeDate(item.last_connected_at)}` : ""}`
+            : formatMaybeDate(item.last_connected_at),
+        );
+        updateIntegrationField(
+          card,
+          "last_tested_at",
+          item.config?.account_currency
+            ? `${item.config.account_currency}${item.last_tested_at ? ` · ${formatMaybeDate(item.last_tested_at)}` : ""}`
+            : formatMaybeDate(item.last_tested_at),
         );
       }
       if (item.source === "shopify") {
@@ -2842,6 +2993,7 @@ function sourceLabel(source) {
   return {
     shopify: "Shopify",
     ga4: "GA4",
+    search_console: "Search Console",
     google_ads: "Google Ads",
     meta_ads: "Meta Ads",
   }[source] || source;
@@ -3661,6 +3813,7 @@ function applyRealSparklineSeries(data) {
     }
   });
   initializeSparklineTooltips();
+  initializeLineChartTooltips();
 }
 
 function buildEmptyRangeSeries(range) {
@@ -3788,6 +3941,64 @@ function formatTooltipValue(value, key) {
   if (["orders", "sessions", "users", "new_customer_orders", "returning_customer_orders"].includes(key)) {
     return formatInteger(value);
   }
+  return formatNumber(value);
+}
+
+function initializeLineChartTooltips() {
+  document.querySelectorAll(".line-chart-interactive").forEach((node) => {
+    if (node.dataset.tooltipBound === "1") return;
+    node.dataset.tooltipBound = "1";
+    node.addEventListener("mousemove", handleLineChartMove);
+    node.addEventListener("mouseleave", handleLineChartLeave);
+  });
+}
+
+function handleLineChartMove(event) {
+  const wrapper = event.currentTarget;
+  const tooltip = wrapper.querySelector(".line-chart-tooltip");
+  const guide = wrapper.querySelector(".line-chart-guide");
+  const payload = JSON.parse(wrapper.dataset.lineChart || "[]");
+  if (!tooltip || !guide || !payload.length) return;
+
+  const rect = wrapper.getBoundingClientRect();
+  const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
+  const index = Math.min(payload.length - 1, Math.round(ratio * Math.max(payload.length - 1, 1)));
+  const point = payload[index];
+  const x = Math.min(Math.max(ratio * rect.width, 16), rect.width - 16);
+
+  tooltip.innerHTML = `
+    <strong>${escapeHtml(point.label || "—")}</strong>
+    ${point.values
+      .map(
+        (item) => `
+          <span class="line-chart-tooltip-row">
+            <i style="background:${item.color}"></i>
+            <b>${escapeHtml(item.label)}</b>
+            <em>${formatLineTooltipValue(item.value, item.format)}</em>
+          </span>
+        `,
+      )
+      .join("")}
+  `;
+  tooltip.style.opacity = "1";
+  tooltip.style.left = `${Math.min(Math.max(x, 88), rect.width - 88)}px`;
+
+  guide.style.opacity = "1";
+  guide.style.left = `${x}px`;
+}
+
+function handleLineChartLeave(event) {
+  const tooltip = event.currentTarget.querySelector(".line-chart-tooltip");
+  const guide = event.currentTarget.querySelector(".line-chart-guide");
+  if (tooltip) tooltip.style.opacity = "0";
+  if (guide) guide.style.opacity = "0";
+}
+
+function formatLineTooltipValue(value, format = "number") {
+  if (format === "currency") return formatCurrency(value);
+  if (format === "integer") return formatInteger(value);
+  if (format === "percent") return `${formatNumber(value)}%`;
+  if (format === "roas") return `${formatNumber(value)}x`;
   return formatNumber(value);
 }
 

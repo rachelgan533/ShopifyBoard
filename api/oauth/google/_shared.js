@@ -5,6 +5,7 @@ const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo";
 const GOOGLE_GA4_SCOPE = "https://www.googleapis.com/auth/analytics.readonly";
 const GOOGLE_ADS_SCOPE = "https://www.googleapis.com/auth/adwords";
+const GOOGLE_SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
 const GOOGLE_IDENTITY_SCOPES = ["openid", "email", "profile"];
 const DEFAULT_RETURN_PATH = "/settings/integration";
 
@@ -14,6 +15,7 @@ module.exports = {
   GOOGLE_USERINFO_URL,
   GOOGLE_GA4_SCOPE,
   GOOGLE_ADS_SCOPE,
+  GOOGLE_SEARCH_CONSOLE_SCOPE,
   GOOGLE_IDENTITY_SCOPES,
   DEFAULT_RETURN_PATH,
   assertAuthorized,

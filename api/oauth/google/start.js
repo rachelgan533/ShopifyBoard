@@ -2,6 +2,7 @@ const {
   GOOGLE_AUTH_URL,
   GOOGLE_GA4_SCOPE,
   GOOGLE_ADS_SCOPE,
+  GOOGLE_SEARCH_CONSOLE_SCOPE,
   GOOGLE_IDENTITY_SCOPES,
   DEFAULT_RETURN_PATH,
   assertAuthorized,
@@ -22,7 +23,7 @@ module.exports = async function handler(req, res) {
 
     const body = await readJson(req);
     const source = String(body.source || "").trim() || "ga4";
-    if (!["ga4", "google_ads"].includes(source)) {
+    if (!["ga4", "google_ads", "search_console"].includes(source)) {
       return res.status(400).json({ error: "Unsupported OAuth source" });
     }
 
@@ -56,6 +57,18 @@ module.exports = async function handler(req, res) {
       }
     }
 
+    if (source === "search_console") {
+      const siteUrl = String(integration?.config?.site_url || "").trim();
+      if (!siteUrl) {
+        return res.status(400).json({
+          error: "Missing Search Console site URL",
+          details: {
+            fix: "请先在 Google Search Console 卡片中填写 Site URL（例如 sc-domain:example.com 或 https://www.example.com/），并保存配置。",
+          },
+        });
+      }
+    }
+
     const { clientId, redirectUri } = getGoogleOAuthConfig(req);
     const state = createSignedState({
       source,
@@ -70,7 +83,7 @@ module.exports = async function handler(req, res) {
     authUrl.searchParams.set(
       "scope",
       [
-        source === "google_ads" ? GOOGLE_ADS_SCOPE : GOOGLE_GA4_SCOPE,
+        source === "google_ads" ? GOOGLE_ADS_SCOPE : source === "search_console" ? GOOGLE_SEARCH_CONSOLE_SCOPE : GOOGLE_GA4_SCOPE,
         ...GOOGLE_IDENTITY_SCOPES,
       ].join(" "),
     );

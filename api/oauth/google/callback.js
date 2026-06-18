@@ -12,6 +12,7 @@ const {
 
 const GOOGLE_GA4_API_BASE = "https://analyticsdata.googleapis.com/v1beta";
 const GOOGLE_ADS_API_BASE = "https://googleads.googleapis.com/v19";
+const GOOGLE_SEARCH_CONSOLE_API_BASE = "https://www.googleapis.com/webmasters/v3";
 
 module.exports = async function handler(req, res) {
   let source = "ga4";
@@ -40,7 +41,7 @@ module.exports = async function handler(req, res) {
     }
 
     const payload = verifySignedState(state);
-    if (!["ga4", "google_ads"].includes(payload.source)) {
+    if (!["ga4", "google_ads", "search_console"].includes(payload.source)) {
       return redirect(res, buildRedirectUrl(baseUrl, {
         oauth_status: "error",
         oauth_source: payload.source || "ga4",
@@ -129,6 +130,35 @@ module.exports = async function handler(req, res) {
             "",
         },
       });
+    } else if (source === "search_console") {
+      const siteUrl = String(integration?.config?.site_url || "").trim();
+      if (!siteUrl) {
+        return redirect(res, buildRedirectUrl(baseUrl, {
+          oauth_status: "error",
+          oauth_source: "search_console",
+          oauth_message: "请先在集成设置中填写并保存 Search Console 的 Site URL",
+        }));
+      }
+
+      await querySearchConsole(siteUrl, accessToken, {
+        startDate: offsetDateString(7),
+        endDate: offsetDateString(1),
+        dimensions: ["date"],
+        rowLimit: 1,
+      });
+
+      await touchIntegration("search_console", {
+        status: "connected",
+        last_connected_at: syncedAt,
+        last_tested_at: syncedAt,
+        config: {
+          auth_mode: "oauth",
+          refresh_token: refreshToken,
+          google_account_email: profile.email || integration?.config?.google_account_email || "",
+          google_auth_mode: "Google OAuth",
+          site_url: siteUrl,
+        },
+      });
     }
 
     return redirect(res, buildRedirectUrl(baseUrl, {
@@ -139,6 +169,8 @@ module.exports = async function handler(req, res) {
           ? `已绑定 ${profile.email}`
           : source === "google_ads"
             ? "Google Ads 已完成 Google 授权"
+            : source === "search_console"
+              ? "Search Console 已完成 Google 授权"
             : "GA4 已完成 Google 授权",
     }));
   } catch (error) {
@@ -146,8 +178,7 @@ module.exports = async function handler(req, res) {
       oauth_status: "error",
       oauth_source: source,
       oauth_message:
-        error.details?.error?.message ||
-        error.details?.message ||
+        describeGoogleOauthCallbackError(error.details) ||
         error.details?.error_description ||
         error.message ||
         "GA4 Google 授权失败",
@@ -225,8 +256,73 @@ async function queryGoogleAdsCustomer({ accessToken, developerToken, customerId,
   return firstResult || {};
 }
 
+async function querySearchConsole(siteUrl, accessToken, body) {
+  const encodedSiteUrl = encodeURIComponent(siteUrl);
+  const response = await fetch(`${GOOGLE_SEARCH_CONSOLE_API_BASE}/sites/${encodedSiteUrl}/searchAnalytics/query`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error("Search Console query failed");
+    error.statusCode = response.status;
+    error.details = payload;
+    throw error;
+  }
+
+  return payload;
+}
+
 function normalizeGoogleAdsCustomerId(value) {
   return String(value || "").replace(/[^\d]/g, "").trim();
+}
+
+function describeGoogleOauthCallbackError(details) {
+  const topLevelMessage = details?.error?.message || details?.message || "";
+  const nested = (details?.error?.details || [])
+    .flatMap((detail) => detail?.errors || [])
+    .map((item) => item?.message)
+    .filter(Boolean);
+  const codes = (details?.error?.details || [])
+    .flatMap((detail) => detail?.errors || [])
+    .flatMap((item) => Object.values(item?.errorCode || {}))
+    .filter(Boolean);
+  const combined = [topLevelMessage, ...nested, ...codes].join(" | ").toLowerCase();
+
+  if (combined.includes("developer token")) {
+    return "Google Ads Developer Token 无效、未获批，或当前账号不可用";
+  }
+  if (combined.includes("login-customer-id")) {
+    return "Login Customer ID 不正确，请检查 MCC 经理账号";
+  }
+  if (combined.includes("user_permission_denied") || combined.includes("permission")) {
+    return "当前 Google 账号没有访问该 Google Ads 账户的权限";
+  }
+  if (combined.includes("customer_not_enabled") || combined.includes("customer not found")) {
+    return "Google Ads Customer ID 不可用，请确认账号已启用且填写正确";
+  }
+  if (combined.includes("ga4 runreport failed")) {
+    return "GA4 runReport 失败，请确认 Property ID 正确且当前账号有该媒体资源权限";
+  }
+  if (combined.includes("search console query failed")) {
+    return "Search Console 查询失败，请确认 Site URL 正确且当前 Google 账号有该资源权限";
+  }
+
+  return topLevelMessage || nested[0] || "";
+}
+
+function offsetDateString(daysAgo) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() - Number(daysAgo || 0));
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function redirect(res, location) {
