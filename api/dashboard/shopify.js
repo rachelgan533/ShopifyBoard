@@ -1326,6 +1326,9 @@ function buildAttributionComparison(trafficAttribution, orderAttribution) {
     Object.assign(merged.get(key), {
       sessions: row.sessions,
       users: row.users,
+      add_to_carts: row.add_to_carts,
+      checkouts: row.checkouts,
+      purchases: row.purchases,
       traffic_cvr: row.cvr,
       add_to_cart_rate: row.add_to_cart_rate,
       checkout_rate: row.checkout_rate,

@@ -499,6 +499,8 @@ function buildDemoPayload(shop, days) {
     ]),
   ];
 
+  const searchConsole = buildSearchConsoleDemo(shop.id, today, days);
+
   const couponRows = coupons.map((coupon) => ({
     shop_id: shop.id,
     code: coupon.code,
@@ -561,9 +563,124 @@ function buildDemoPayload(shop, days) {
     ga4Daily,
     trafficDaily,
     adDaily,
+    searchConsole,
     audience,
     behaviorEvents,
   };
+}
+
+function buildSearchConsoleDemo(shopId, today, days) {
+  const queries = [
+    "cold press juicer",
+    "best juicer for celery",
+    "portable juice cup",
+    "juicer bundle",
+    "smoothie maker mini",
+    "slow juicer vs blender",
+  ];
+  const pages = [
+    "/products/c16-3-in-1-multi-function-juicer",
+    "/products/cold-press-blender-pro",
+    "/products/portable-juice-cup",
+    "/collections/juicers",
+    "/blogs/news/how-to-choose-a-juicer",
+  ];
+  const countries = ["United States", "United Kingdom", "Canada", "Australia", "Germany"];
+  const devices = ["mobile", "desktop", "tablet"];
+  const rows = [];
+
+  for (let index = 0; index < days; index += 1) {
+    const dayDate = new Date(today);
+    dayDate.setUTCDate(today.getUTCDate() - (days - 1 - index));
+    const day = toDateOnly(dayDate);
+    const clicks = 140 + Math.round(pseudo(index + 301) * 90);
+    const impressions = clicks * (10 + Math.round(pseudo(index + 317) * 8));
+    const ctr = round((clicks / Math.max(impressions, 1)) * 100);
+    const position = round(4.2 + pseudo(index + 329) * 6.8);
+
+    rows.push({
+      shop_id: shopId,
+      site_url: "sc-domain:demo-canoly.com",
+      day,
+      dimension_type: "summary",
+      dimension_value: "all",
+      clicks,
+      impressions,
+      ctr,
+      position,
+      raw: { demo_seed: true },
+    });
+
+    queries.forEach((query, queryIndex) => {
+      const queryClicks = Math.max(8, Math.round(clicks * (0.24 - queryIndex * 0.025 + pseudo(index + queryIndex + 341) * 0.015)));
+      const queryImpressions = Math.max(queryClicks * 6, Math.round(impressions * (0.2 - queryIndex * 0.02 + pseudo(index + queryIndex + 353) * 0.02)));
+      rows.push({
+        shop_id: shopId,
+        site_url: "sc-domain:demo-canoly.com",
+        day,
+        dimension_type: "query",
+        dimension_value: query,
+        clicks: queryClicks,
+        impressions: queryImpressions,
+        ctr: round((queryClicks / Math.max(queryImpressions, 1)) * 100),
+        position: round(position + queryIndex * 0.7),
+        raw: { demo_seed: true },
+      });
+    });
+
+    pages.forEach((page, pageIndex) => {
+      const pageClicks = Math.max(10, Math.round(clicks * (0.28 - pageIndex * 0.035 + pseudo(index + pageIndex + 367) * 0.02)));
+      const pageImpressions = Math.max(pageClicks * 7, Math.round(impressions * (0.25 - pageIndex * 0.03 + pseudo(index + pageIndex + 379) * 0.02)));
+      rows.push({
+        shop_id: shopId,
+        site_url: "sc-domain:demo-canoly.com",
+        day,
+        dimension_type: "page",
+        dimension_value: page,
+        clicks: pageClicks,
+        impressions: pageImpressions,
+        ctr: round((pageClicks / Math.max(pageImpressions, 1)) * 100),
+        position: round(position + pageIndex * 0.5),
+        raw: { demo_seed: true },
+      });
+    });
+
+    countries.forEach((country, countryIndex) => {
+      const countryClicks = Math.max(6, Math.round(clicks * (0.35 - countryIndex * 0.05 + pseudo(index + countryIndex + 391) * 0.02)));
+      const countryImpressions = Math.max(countryClicks * 8, Math.round(impressions * (0.33 - countryIndex * 0.045 + pseudo(index + countryIndex + 401) * 0.02)));
+      rows.push({
+        shop_id: shopId,
+        site_url: "sc-domain:demo-canoly.com",
+        day,
+        dimension_type: "country",
+        dimension_value: country,
+        clicks: countryClicks,
+        impressions: countryImpressions,
+        ctr: round((countryClicks / Math.max(countryImpressions, 1)) * 100),
+        position: round(position + countryIndex * 0.35),
+        raw: { demo_seed: true },
+      });
+    });
+
+    devices.forEach((device, deviceIndex) => {
+      const deviceClicks = Math.max(4, Math.round(clicks * (device === "mobile" ? 0.58 : device === "desktop" ? 0.34 : 0.08)));
+      const deviceImpressions = Math.max(deviceClicks * 9, Math.round(impressions * (device === "mobile" ? 0.56 : device === "desktop" ? 0.35 : 0.09)));
+      rows.push({
+        shop_id: shopId,
+        site_url: "sc-domain:demo-canoly.com",
+        day,
+        dimension_type: "device",
+        dimension_value: device,
+        clicks: deviceClicks,
+        impressions: deviceImpressions,
+        ctr: round((deviceClicks / Math.max(deviceImpressions, 1)) * 100),
+        position: round(position + deviceIndex * 0.2),
+        raw: { demo_seed: true },
+      });
+    });
+  }
+
+  return rows;
 }
 
 function buildBehaviorEvents(shop, context) {
@@ -830,6 +947,7 @@ async function upsertDemoData(shop, payload) {
   await upsertBatch("ga4_daily_metrics", payload.ga4Daily, "shop_id,day,device,country,city");
   await upsertBatch("traffic_attribution_daily", payload.trafficDaily, "shop_id,day,source_system,channel_primary,channel_secondary");
   await upsertBatch("ad_daily_metrics", payload.adDaily, "shop_id,source,day,campaign_id");
+  await upsertBatch("search_console_metrics", payload.searchConsole, "shop_id,site_url,day,dimension_type,dimension_value");
   await upsertBatch("audience_segments", payload.audience, "shop_id,source,segment_type,segment_name,day");
   await upsertBatch("user_behavior_events", payload.behaviorEvents, "id");
 
@@ -851,11 +969,16 @@ async function upsertDemoData(shop, payload) {
     ad_account_id: "act_demo",
     google_auth_mode: "Demo Data",
   });
+  await touchIntegration(shop.id, "search_console", "connected", {
+    site_url: "sc-domain:demo-canoly.com",
+    google_auth_mode: "Demo Data",
+  });
 
   await upsertSyncState(shop.id, "shopify", "orders");
   await upsertSyncState(shop.id, "ga4", "daily_metrics");
   await upsertSyncState(shop.id, "google_ads", "daily_metrics");
   await upsertSyncState(shop.id, "meta_ads", "daily_metrics");
+  await upsertSyncState(shop.id, "search_console", "daily_metrics");
 }
 
 function summarizePayload(payload) {
@@ -869,6 +992,7 @@ function summarizePayload(payload) {
     ga4_daily_rows: payload.ga4Daily.length,
     traffic_daily_rows: payload.trafficDaily.length,
     ad_daily_rows: payload.adDaily.length,
+    search_console_rows: payload.searchConsole.length,
     audience_rows: payload.audience.length,
     behavior_event_rows: payload.behaviorEvents.length,
     goals: payload.goals.length,
