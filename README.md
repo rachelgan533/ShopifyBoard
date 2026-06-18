@@ -151,6 +151,83 @@ group by customer_country
 order by revenue desc;
 ```
 
+## 行为分析扩展
+
+如果你要继续做站内用户路径、行为漏斗和高意图信号识别，项目里已经补了一份行为分析设计和 SQL 基础结构：
+
+- 设计文档：
+  [docs/user-behavior-analytics-plan.md](/Users/rachel/Documents/Codex/2026-06-09/vercel-supabase-shopify/docs/user-behavior-analytics-plan.md)
+- SQL：
+  [supabase-sql-parts/06-user-behavior-analytics.sql](/Users/rachel/Documents/Codex/2026-06-09/vercel-supabase-shopify/supabase-sql-parts/06-user-behavior-analytics.sql)
+
+如果你的 Supabase SQL Editor 一次只能跑 100 行，也可以改用拆分版本，按顺序执行：
+
+- [supabase-sql-parts/06-user-behavior-analytics-01-tables.sql](/Users/rachel/Documents/Codex/2026-06-09/vercel-supabase-shopify/supabase-sql-parts/06-user-behavior-analytics-01-tables.sql)
+- [supabase-sql-parts/06-user-behavior-analytics-02-views-a.sql](/Users/rachel/Documents/Codex/2026-06-09/vercel-supabase-shopify/supabase-sql-parts/06-user-behavior-analytics-02-views-a.sql)
+- [supabase-sql-parts/06-user-behavior-analytics-03-views-b.sql](/Users/rachel/Documents/Codex/2026-06-09/vercel-supabase-shopify/supabase-sql-parts/06-user-behavior-analytics-03-views-b.sql)
+
+这部分会新增：
+
+- `behavior_event_definitions`
+- `user_behavior_events`
+- `dashboard_behavior_summary_30d`
+- `dashboard_behavior_funnel_30d`
+- `dashboard_behavior_page_performance_30d`
+- `dashboard_behavior_channel_30d`
+
+建议实施顺序：
+
+1. 先建行为事件表
+2. 再接 Shopify Pixel / GA4 事件
+3. 再做用户行为分析看板
+
+### 行为事件写入接口
+
+项目现在提供了统一的行为事件写入入口：
+
+```text
+POST /api/behavior-events
+```
+
+建议在 Vercel 环境变量中配置：
+
+```bash
+BEHAVIOR_WRITE_KEY=一串给前端像素使用的写入密钥
+```
+
+请求支持：
+
+- 单条事件
+- 批量事件 `events: []`
+- 通过 `shop_domain` 或 `shop_id` 指定店铺
+
+示例：
+
+```json
+{
+  "shop_domain": "your-store.myshopify.com",
+  "events": [
+    {
+      "event_name": "page_view",
+      "event_time": "2026-06-18T12:30:00.000Z",
+      "session_id": "sess_001",
+      "user_pseudo_id": "anon_001",
+      "page_url": "/products/c16-3-in-1-multi-function-juicer",
+      "page_type": "product",
+      "channel_primary": "organic",
+      "device_category": "mobile",
+      "product_id": "gid://shopify/Product/1234567890"
+    }
+  ]
+}
+```
+
+可以通过以下任一方式鉴权：
+
+- `Authorization: Bearer <BEHAVIOR_WRITE_KEY>`
+- `x-behavior-write-key: <BEHAVIOR_WRITE_KEY>`
+- `CRON_SECRET`（调试/后台批量写入时）
+
 ## 4. Shopify 同步
 
 项目里已经创建了 Vercel 服务端接口：

@@ -121,6 +121,29 @@ async function syncGa4() {
   const dailyRows = mapDailyMetrics(shopId, dailyReport.rows || []);
   await upsertBatch("ga4_daily_metrics", dailyRows, "shop_id,day,device,country,city");
 
+  const channelReport = await runGa4Report(propertyId, accessToken, {
+    dateRanges: [{ startDate, endDate }],
+    dimensions: [{ name: "date" }, { name: "sessionDefaultChannelGroup" }],
+    metrics: [
+      { name: "sessions" },
+      { name: "totalUsers" },
+      { name: "newUsers" },
+      { name: "engagedSessions" },
+      { name: "addToCarts" },
+      { name: "checkouts" },
+      { name: "ecommercePurchases" },
+    ],
+    limit: "100000",
+  });
+
+  const trafficRows = mapTrafficAttributionRows(shopId, channelReport.rows || []);
+  await clearTrafficAttributionRange(shopId, startDate, endDate, "ga4");
+  await upsertBatch(
+    "traffic_attribution_daily",
+    trafficRows,
+    "shop_id,day,source_system,channel_primary,channel_secondary",
+  );
+
   await supabaseFetch(
     `/rest/v1/audience_segments?source=eq.ga4&day=eq.${encodeURIComponent(audienceDay)}&select=id`,
     { method: "DELETE", headers: { prefer: "return=minimal" } },
@@ -192,6 +215,7 @@ async function syncGa4() {
     property_id: propertyId,
     shop_id: shopId,
     synced_daily_rows: dailyRows.length,
+    synced_traffic_rows: trafficRows.length,
     synced_segment_rows: syncedSegmentRows,
     skipped_segments: skippedSegments,
     synced_at: syncedAt,
@@ -447,6 +471,74 @@ function mapAudienceSegments(shopId, segmentType, day, rows) {
     });
 }
 
+function mapTrafficAttributionRows(shopId, rows) {
+  return rows
+    .map((row) => {
+      const dims = row.dimensionValues || [];
+      const metrics = row.metricValues || [];
+      const rawChannel = cleanSegmentName(dims[1]?.value) || "Unassigned";
+      const normalized = normalizeTrafficChannel(rawChannel);
+      return {
+        shop_id: shopId,
+        day: formatGaDate(dims[0]?.value),
+        source_system: "ga4",
+        channel_primary: normalized.channel_primary,
+        channel_secondary: normalized.channel_secondary,
+        sessions: number(metrics[0]?.value),
+        users: number(metrics[1]?.value),
+        new_users: number(metrics[2]?.value),
+        engaged_sessions: number(metrics[3]?.value),
+        add_to_carts: number(metrics[4]?.value),
+        checkouts: number(metrics[5]?.value),
+        purchases: number(metrics[6]?.value),
+        revenue: 0,
+        clicks: 0,
+        impressions: 0,
+        spend: 0,
+        raw: row,
+      };
+    })
+    .filter((row) => row.day && row.channel_primary);
+}
+
+function normalizeTrafficChannel(rawChannel) {
+  const value = String(rawChannel || "").trim();
+  const normalized = value.toLowerCase();
+
+  if (normalized === "direct") {
+    return { channel_primary: "direct", channel_secondary: value };
+  }
+  if (/(organic search|paid search)/.test(normalized)) {
+    return {
+      channel_primary: normalized.includes("paid") ? "ads" : "organic",
+      channel_secondary: value,
+    };
+  }
+  if (/(organic social|paid social|cross-network|display|paid shopping|paid video|audio|mobile push notifications)/.test(normalized)) {
+    return {
+      channel_primary: /(paid|cross-network|display|shopping|video|audio)/.test(normalized) ? "ads" : "sns",
+      channel_secondary: value,
+    };
+  }
+  if (/(email)/.test(normalized)) {
+    return { channel_primary: "edm", channel_secondary: value };
+  }
+  if (/(referral|affiliate)/.test(normalized)) {
+    return { channel_primary: "affiliate", channel_secondary: value };
+  }
+  if (/(organic shopping)/.test(normalized)) {
+    return { channel_primary: "organic", channel_secondary: value };
+  }
+  if (/(organic video)/.test(normalized)) {
+    return { channel_primary: "sns", channel_secondary: value };
+  }
+  if (/(unassigned)/.test(normalized)) {
+    return { channel_primary: "unknown", channel_secondary: value };
+  }
+
+  return { channel_primary: "other", channel_secondary: value };
+}
+
 function formatGaDate(value) {
   if (!value || !/^\d{8}$/.test(value)) return null;
   return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
@@ -524,6 +616,43 @@ async function upsertSyncState(shopId, patch) {
     headers: { prefer: "return=minimal" },
     body: JSON.stringify([row]),
   });
+}
+
+async function clearTrafficAttributionRange(shopId, startDate, endDate, sourceSystem) {
+  const start = formatRelativeGaDate(startDate);
+  const end = formatRelativeGaDate(endDate);
+  if (!start || !end) return;
+  await supabaseFetch(
+    `/rest/v1/traffic_attribution_daily?shop_id=eq.${encodeURIComponent(shopId)}&source_system=eq.${encodeURIComponent(
+      sourceSystem,
+    )}&day=gte.${start}&day=lte.${end}`,
+    {
+      method: "DELETE",
+      headers: { prefer: "return=minimal" },
+    },
+  );
+}
+
+function formatRelativeGaDate(value) {
+  if (!value) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  if (/^\d+daysAgo$/.test(value)) {
+    const daysAgo = Number(value.replace("daysAgo", ""));
+    const date = new Date();
+    date.setUTCHours(0, 0, 0, 0);
+    date.setUTCDate(date.getUTCDate() - daysAgo);
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
+      date.getUTCDate(),
+    ).padStart(2, "0")}`;
+  }
+  if (value === "today") {
+    const date = new Date();
+    date.setUTCHours(0, 0, 0, 0);
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
+      date.getUTCDate(),
+    ).padStart(2, "0")}`;
+  }
+  return null;
 }
 
 async function getIntegration(source) {

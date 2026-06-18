@@ -67,6 +67,30 @@ create table if not exists search_console_metrics (
   unique (shop_id, site_url, day, dimension_type, dimension_value)
 );
 
+create table if not exists traffic_attribution_daily (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid references shops(id) on delete cascade,
+  day date not null,
+  source_system text not null default 'ga4',
+  channel_primary text not null,
+  channel_secondary text,
+  sessions int default 0,
+  users int default 0,
+  new_users int default 0,
+  engaged_sessions int default 0,
+  add_to_carts int default 0,
+  checkouts int default 0,
+  purchases int default 0,
+  revenue numeric default 0,
+  clicks int default 0,
+  impressions int default 0,
+  spend numeric default 0,
+  raw jsonb default '{}'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique (shop_id, day, source_system, channel_primary, channel_secondary)
+);
+
 create index if not exists idx_orders_shop_created_at on orders(shop_id, created_at desc);
 create index if not exists idx_orders_shop_customer on orders(shop_id, customer_id);
 create index if not exists idx_orders_country on orders(shop_id, customer_country);
@@ -78,6 +102,7 @@ create index if not exists idx_ga4_day on ga4_daily_metrics(shop_id, day desc);
 create index if not exists idx_ads_day on ad_daily_metrics(shop_id, source, day desc);
 create index if not exists idx_audience_segments on audience_segments(shop_id, source, segment_type, day desc);
 create index if not exists idx_search_console_day on search_console_metrics(shop_id, day desc, dimension_type);
+create index if not exists idx_traffic_attr_day on traffic_attribution_daily(shop_id, day desc, channel_primary);
 
 drop trigger if exists trg_shops_updated_at on shops;
 create trigger trg_shops_updated_at before update on shops
@@ -101,4 +126,8 @@ for each row execute function set_updated_at();
 
 drop trigger if exists trg_search_console_metrics_updated_at on search_console_metrics;
 create trigger trg_search_console_metrics_updated_at before update on search_console_metrics
+for each row execute function set_updated_at();
+
+drop trigger if exists trg_traffic_attribution_daily_updated_at on traffic_attribution_daily;
+create trigger trg_traffic_attribution_daily_updated_at before update on traffic_attribution_daily
 for each row execute function set_updated_at();

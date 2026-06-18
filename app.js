@@ -5,6 +5,7 @@ const routes = {
   "/marketing": "marketing",
   "/attribution": "attribution",
   "/customers": "customers",
+  "/behavior": "behavior",
   "/aarrr": "aarrr",
   "/settings/goals": "goals",
   "/settings/integration": "integration",
@@ -18,6 +19,7 @@ const pageMeta = {
   marketing: ["营销分析", "近 30 天 · 加载中..."],
   attribution: ["归因分析", "近 30 天 · Shopify last click"],
   customers: ["客户分析", "近 30 天 · Shopify 真实数据"],
+  behavior: ["用户行为分析", "近 30 天 · 站内路径与行为漏斗"],
   aarrr: ["AARRR 分析", "近 30 天"],
   goals: ["目标设置", "长期维护经营目标，支持创建、编辑与历史追踪"],
   integration: ["集成设置", "管理 Shopify、GA4、Search Console、Meta Ads 等数据源连接与同步"],
@@ -31,6 +33,7 @@ const navItems = [
   ["/marketing", "⚐", "营销分析"],
   ["/attribution", "⌬", "归因分析"],
   ["/customers", "♧", "客户分析"],
+  ["/behavior", "◫", "用户行为分析"],
   ["/aarrr", "⌁", "AARRR 分析"],
 ];
 
@@ -217,7 +220,7 @@ function topbar(title, kicker, page) {
 }
 
 function resolveKicker(kicker, page) {
-  if (["northstar", "personas", "operations", "marketing", "attribution", "customers", "aarrr"].includes(page)) {
+  if (["northstar", "personas", "operations", "marketing", "attribution", "customers", "behavior", "aarrr"].includes(page)) {
     return `${activeRangeLabel()} · ${kicker.replace(/^近 30 天 · /, "").replace(/^近 30 天/, "").trim().replace(/^·\s*/, "")}`;
   }
   return kicker;
@@ -1077,25 +1080,63 @@ function renderOperationsDashboard(data, cardDelta) {
 }
 
 function renderAttributionDashboard(data) {
+  const trafficAttribution = data.traffic_attribution || {};
+  const previousTrafficAttribution = data.previous?.traffic_attribution || {};
+  const searchConsole = data.search_console || {};
+  const previousSearchConsole = data.previous?.search_console || {};
   const attribution = data.attribution || {};
+  const attributionComparison = data.attribution_comparison || [];
   const previousAttribution = data.previous?.attribution || {};
+  const trafficSummary = trafficAttribution.summary || {};
+  const organicSummary = searchConsole.summary || {};
   const summary = attribution.summary || {};
   const quality = attribution.quality || {};
+  const trafficChannelRows = trafficAttribution.channels || [];
+  const organicDaily = searchConsole.daily || [];
+  const topQueries = searchConsole.top_queries || [];
+  const topPages = searchConsole.top_pages || [];
   const channelRows = attribution.channels || [];
   const topKol = attribution.top_kol || [];
   const topAffiliate = attribution.top_affiliate || [];
+  const trafficTrendRows = trafficAttribution.daily || [];
   const trendRows = attribution.daily || [];
+  const efficiencyQuadrants = buildAttributionEfficiencyQuadrants(attributionComparison);
 
   const overviewCards = [
+    metricCard("流量会话", formatInteger(trafficSummary.sessions), compareDelta(trafficSummary.sessions, previousTrafficAttribution.summary?.sessions), "GA4"),
+    metricCard("流量用户", formatInteger(trafficSummary.users), compareDelta(trafficSummary.users, previousTrafficAttribution.summary?.users), "GA4"),
+    metricCard("流量转化", `${formatNumber(trafficSummary.cvr)}%`, compareDelta(trafficSummary.cvr, previousTrafficAttribution.summary?.cvr), "GA4"),
     metricCard("归因订单", formatInteger(summary.orders), compareDelta(summary.orders, previousAttribution.summary?.orders), "Shopify"),
     metricCard("归因销售额", formatCurrency(summary.revenue), compareDelta(summary.revenue, previousAttribution.summary?.revenue), "Shopify"),
     metricCard("Last Click 就绪", formatInteger(quality.ready_orders), compareDelta(quality.ready_orders, previousAttribution.quality?.ready_orders), "Shopify"),
-    metricCard("回退归因", formatInteger(quality.fallback_orders), compareDelta(quality.fallback_orders, previousAttribution.quality?.fallback_orders), "Shopify"),
-    metricCard("待补归因", formatInteger(quality.pending_orders), compareDelta(quality.pending_orders, previousAttribution.quality?.pending_orders), "Shopify"),
   ];
 
+  const trafficSessionRows = trafficChannelRows.slice(0, 8).map((row) => [prettyChannel(row.channel), Number(row.sessions || 0), formatInteger(row.sessions)]);
+  const trafficCvrRows = trafficChannelRows.slice(0, 8).map((row) => [prettyChannel(row.channel), Number(row.cvr || 0), `${formatNumber(row.cvr)}%`]);
+  const topQueryRows = topQueries.slice(0, 8).map((row) => [escapeHtml(row.name), formatInteger(row.clicks), `${formatNumber(row.ctr)}%`, formatNumber(row.position)]);
+  const topPageRows = topPages.slice(0, 8).map((row) => [escapeHtml(row.name), formatInteger(row.clicks), formatInteger(row.impressions), `${formatNumber(row.ctr)}%`]);
+  const funnelMatrixRows = attributionComparison
+    .slice(0, 10)
+    .map((row) => [
+      escapeHtml(prettyChannel(row.channel)),
+      formatInteger(row.sessions),
+      formatInteger(row.add_to_carts),
+      formatInteger(row.checkouts),
+      formatInteger(row.orders),
+      formatCurrency(row.revenue),
+      `${formatNumber(row.session_to_order_cvr)}%`,
+      formatCurrency(row.revenue_per_session),
+    ]);
   const channelRevenueRows = channelRows.slice(0, 8).map((row) => [prettyChannel(row.channel), Number(row.revenue || 0), formatCurrency(row.revenue)]);
   const channelOrderRows = channelRows.slice(0, 8).map((row) => [prettyChannel(row.channel), Number(row.order_share || 0), `${formatNumber(row.order_share)}%`]);
+  const trafficTrendSeries = [
+    { key: "ads", label: "Ads", color: "#6375d6" },
+    { key: "organic", label: "Organic", color: "#19a186" },
+    { key: "direct", label: "Direct", color: "#00896b" },
+    { key: "edm", label: "EDM", color: "#f59e0b" },
+    { key: "sns", label: "SNS", color: "#ec4899" },
+    { key: "affiliate", label: "Affiliate", color: "#7a55dc" },
+  ].filter((item) => trafficTrendRows.some((row) => Number(row[item.key] || 0) > 0));
   const trendSeries = [
     { key: "ads", label: "Ads", color: "#6375d6" },
     { key: "organic", label: "Organic", color: "#19a186" },
@@ -1107,6 +1148,179 @@ function renderAttributionDashboard(data) {
   return `
     <div class="grid cols-5 metric-grid-auto">
       ${overviewCards.join("")}
+    </div>
+    ${section(
+      "流量归因总览",
+      "以 GA4 sessionDefaultChannelGroup 为基础，统一映射到 direct / organic / ads / edm / community / sns / pr / kol / affiliate。",
+      `${pill("GA4")} ${pill("Traffic Attribution")}`,
+      `<div class="grid cols-4">
+        <div class="card pad">
+          <div class="metric-label">加购率</div>
+          <div class="metric-value">${formatNumber(trafficSummary.add_to_cart_rate || 0)}%</div>
+          <div class="small-label">Add to Cart / Sessions</div>
+        </div>
+        <div class="card pad">
+          <div class="metric-label">结账率</div>
+          <div class="metric-value">${formatNumber(trafficSummary.checkout_rate || 0)}%</div>
+          <div class="small-label">Checkouts / Sessions</div>
+        </div>
+        <div class="card pad">
+          <div class="metric-label">加购次数</div>
+          <div class="metric-value">${formatInteger(trafficSummary.add_to_carts || 0)}</div>
+          <div class="small-label">当前时间范围</div>
+        </div>
+        <div class="card pad">
+          <div class="metric-label">结账次数</div>
+          <div class="metric-value">${formatInteger(trafficSummary.checkouts || 0)}</div>
+          <div class="small-label">当前时间范围</div>
+        </div>
+      </div>`,
+    )}
+    <div class="grid cols-2">
+      ${trafficSessionRows.length ? barChartCard("流量渠道贡献 · Sessions", trafficSessionRows) : personaEmptyState("当前时间范围内暂无可用的流量渠道 Sessions")}
+      ${trafficCvrRows.length ? barChartCard("流量渠道贡献 · 流量转化率", trafficCvrRows, "#6375d6") : personaEmptyState("当前时间范围内暂无可用的流量渠道 CVR")}
+    </div>
+    ${section(
+      "渠道漏斗矩阵",
+      "把每个渠道的 Sessions、加购、结账、订单与 GMV 放在一张表里，方便快速判断谁带量、谁承接、谁最终拿结果。",
+      `${pill("GA4")} ${pill("Shopify")} ${pill("Funnel Matrix")}`,
+      tableCard(
+        "",
+        ["渠道", "Sessions", "加购", "结账", "订单", "GMV", "Session→Order CVR", "每次访问收入"],
+        funnelMatrixRows.length ? funnelMatrixRows : [[
+          "暂无数据",
+          "0",
+          "0",
+          "0",
+          "0",
+          formatCurrency(0),
+          "0.00%",
+          formatCurrency(0),
+        ]],
+      ),
+    )}
+    ${section(
+      "渠道效率四象限",
+      "以当前时间范围内各渠道的 Sessions 中位数和 Session→Order CVR 中位数为分界，快速判断谁高效、谁待优化。",
+      `${pill("GA4")} ${pill("Shopify")} ${pill("Quadrant View")}`,
+      efficiencyQuadrants.rows.length
+        ? `
+          <div class="quadrant-summary">
+            <span>流量分界：${formatInteger(efficiencyQuadrants.sessionsMedian)} Sessions</span>
+            <span>转化分界：${formatNumber(efficiencyQuadrants.cvrMedian)}%</span>
+          </div>
+          <div class="quadrant-grid">
+            ${efficiencyQuadrants.rows
+              .map(
+                (quadrant) => `
+                  <div class="quadrant-card">
+                    <div class="quadrant-head">
+                      <div>
+                        <div class="quadrant-title">${quadrant.title}</div>
+                        <div class="quadrant-subtitle">${quadrant.subtitle}</div>
+                      </div>
+                      <span class="small-badge">${quadrant.rows.length} 个渠道</span>
+                    </div>
+                    ${
+                      quadrant.rows.length
+                        ? `<div class="insight-list">
+                            ${quadrant.rows
+                              .slice(0, 4)
+                              .map(
+                                (row) => `
+                                  <div class="insight-item quadrant-item">
+                                    <div class="quadrant-item-head">
+                                      <strong>${escapeHtml(prettyChannel(row.channel))}</strong>
+                                      <span>${formatInteger(row.sessions)} Sessions</span>
+                                    </div>
+                                    <div class="quadrant-item-meta">
+                                      <span>CVR ${formatNumber(row.session_to_order_cvr)}%</span>
+                                      <span>GMV ${formatCurrency(row.revenue)}</span>
+                                      <span>RPS ${formatCurrency(row.revenue_per_session)}</span>
+                                    </div>
+                                  </div>
+                                `,
+                              )
+                              .join("")}
+                          </div>`
+                        : personaEmptyState("当前没有落在这个象限的渠道")
+                    }
+                  </div>
+                `,
+              )
+              .join("")}
+          </div>
+        `
+        : personaEmptyState("当前时间范围内暂无可用的流量与订单对照数据"),
+    )}
+    ${section(
+      "流量 vs 订单 对照",
+      "把 GA4 的流量归因和 Shopify 的 last-click 订单归因放到同一张表里看效率差异。",
+      "",
+      tableCard(
+        "",
+        ["渠道", "Sessions", "Users", "订单数", "销售额", "流量->订单 CVR", "每次访问收入", "客单价"],
+        (attributionComparison.length
+          ? attributionComparison
+          : [{ channel: "unknown", sessions: 0, users: 0, orders: 0, revenue: 0, session_to_order_cvr: 0, revenue_per_session: 0, aov: 0 }]
+        ).map((row) => [
+          escapeHtml(prettyChannel(row.channel)),
+          formatInteger(row.sessions),
+          formatInteger(row.users),
+          formatInteger(row.orders),
+          formatCurrency(row.revenue),
+          `${formatNumber(row.session_to_order_cvr)}%`,
+          formatCurrency(row.revenue_per_session),
+          formatCurrency(row.aov),
+        ]),
+      ),
+    )}
+    ${section(
+      "流量趋势",
+      "当前顶部时间范围内，各一级流量渠道的按日 Sessions 趋势。",
+      "",
+      trafficTrendSeries.length
+        ? multiLineTrendCard("GA4 渠道 Sessions 趋势", trafficTrendRows, trafficTrendSeries)
+        : personaEmptyState("当前还没有足够的流量归因趋势数据"),
+    )}
+    ${section(
+      "Organic 深挖",
+      "把 Search Console 的自然搜索点击、展示、CTR 和关键词页表现并到流量归因里看。",
+      `${pill("Search Console")} ${pill("Organic")}`,
+      `<div class="grid cols-4">
+        ${metricCard("Organic 点击", formatInteger(organicSummary.clicks || 0), compareDelta(organicSummary.clicks, previousSearchConsole.summary?.clicks), "Search Console")}
+        ${metricCard("Organic 展示", formatInteger(organicSummary.impressions || 0), compareDelta(organicSummary.impressions, previousSearchConsole.summary?.impressions), "Search Console")}
+        ${metricCard("Organic CTR", `${formatNumber(organicSummary.ctr || 0)}%`, compareDelta(organicSummary.ctr, previousSearchConsole.summary?.ctr), "Search Console")}
+        ${metricCard("平均排名", formatNumber(organicSummary.position || 0), compareDelta((previousSearchConsole.summary?.position || 0) - (organicSummary.position || 0), 0), "Search Console")}
+      </div>`,
+    )}
+    <div class="grid cols-2">
+      ${organicDaily.length
+        ? multiLineTrendCard("Organic Clicks / Impressions 趋势", organicDaily, [
+            { key: "clicks", label: "Clicks", color: "#00896b" },
+            { key: "impressions", label: "Impressions", color: "#6375d6" },
+          ])
+        : personaEmptyState("当前时间范围内暂无 Search Console 趋势数据")}
+      ${topQueries.length
+        ? compactTableCard("Top Queries", ["Query", "Clicks", "CTR", "Avg Pos"], topQueryRows)
+        : personaEmptyState("当前时间范围内暂无 Query 数据")}
+    </div>
+    <div class="grid cols-2">
+      ${topPages.length
+        ? compactTableCard("Top Pages", ["Page", "Clicks", "Impr.", "CTR"], topPageRows)
+        : personaEmptyState("当前时间范围内暂无 Page 数据")}
+      ${searchConsole.countries?.length
+        ? compactTableCard(
+            "Organic 国家分布",
+            ["Country", "Clicks", "CTR", "Avg Pos"],
+            searchConsole.countries.slice(0, 8).map((row) => [
+              escapeHtml(row.name),
+              formatInteger(row.clicks),
+              `${formatNumber(row.ctr)}%`,
+              formatNumber(row.position),
+            ]),
+          )
+        : personaEmptyState("当前时间范围内暂无国家维度 Search Console 数据")}
     </div>
     ${section(
       "归因总览",
@@ -1210,6 +1424,76 @@ function renderAttributionDashboard(data) {
       </div>`,
     )}
   `;
+}
+
+function buildAttributionEfficiencyQuadrants(rows) {
+  const safeRows = (rows || [])
+    .filter((row) => Number(row.sessions || 0) > 0)
+    .map((row) => ({
+      ...row,
+      sessions: Number(row.sessions || 0),
+      session_to_order_cvr: Number(row.session_to_order_cvr || 0),
+      revenue: Number(row.revenue || 0),
+      revenue_per_session: Number(row.revenue_per_session || 0),
+    }));
+
+  if (!safeRows.length) {
+    return {
+      sessionsMedian: 0,
+      cvrMedian: 0,
+      rows: [],
+    };
+  }
+
+  const sessionsMedian = medianNumber(safeRows.map((row) => row.sessions));
+  const cvrMedian = medianNumber(safeRows.map((row) => row.session_to_order_cvr));
+
+  const quadrants = [
+    {
+      key: "high-high",
+      title: "高流量 · 高转化",
+      subtitle: "最值得持续放大的渠道",
+      predicate: (row) => row.sessions >= sessionsMedian && row.session_to_order_cvr >= cvrMedian,
+    },
+    {
+      key: "high-low",
+      title: "高流量 · 低转化",
+      subtitle: "带量明显，但承接链路需要优化",
+      predicate: (row) => row.sessions >= sessionsMedian && row.session_to_order_cvr < cvrMedian,
+    },
+    {
+      key: "low-high",
+      title: "低流量 · 高转化",
+      subtitle: "效率不错，适合继续放大引流",
+      predicate: (row) => row.sessions < sessionsMedian && row.session_to_order_cvr >= cvrMedian,
+    },
+    {
+      key: "low-low",
+      title: "低流量 · 低转化",
+      subtitle: "当前贡献有限，优先级可后放",
+      predicate: (row) => row.sessions < sessionsMedian && row.session_to_order_cvr < cvrMedian,
+    },
+  ];
+
+  return {
+    sessionsMedian,
+    cvrMedian,
+    rows: quadrants.map((quadrant) => ({
+      ...quadrant,
+      rows: safeRows
+        .filter(quadrant.predicate)
+        .sort((a, b) => b.revenue - a.revenue || b.sessions - a.sessions),
+    })),
+  };
+}
+
+function medianNumber(values) {
+  const sorted = (values || [])
+    .map((value) => Number(value || 0))
+    .sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
 function multiLineTrendCard(title, rows, seriesMeta) {
@@ -1655,6 +1939,10 @@ function customersPage() {
   `;
 }
 
+function behaviorPage() {
+  return `<div data-behavior-content>${personaEmptyState("正在加载用户行为分析…", "行为事件接通后，这里会展示漏斗、Top 路径、页面表现和高意图动作。")}</div>`;
+}
+
 function aarrrPage() {
   return `
     <div data-aarrr-acquisition>${stage("A", "Acquisition", "获取 · 流量与广告投放", `
@@ -2096,6 +2384,7 @@ function render() {
     marketing: marketingPage,
     attribution: attributionPage,
     customers: customersPage,
+    behavior: behaviorPage,
     aarrr: aarrrPage,
     goals: goalsPage,
     integration: integrationPage,
@@ -3219,6 +3508,11 @@ function applyDashboardData(data) {
     );
   }
 
+  const behaviorContent = document.querySelector("[data-behavior-content]");
+  if (behaviorContent) {
+    behaviorContent.innerHTML = renderBehaviorDashboard(data.behavior || {}, data.previous?.behavior || {});
+  }
+
   const countrySales = document.querySelector("[data-country-sales]");
   if (countrySales && data.country_sales?.length) {
     countrySales.innerHTML = tableCard(
@@ -3797,6 +4091,119 @@ function applyDashboardData(data) {
   }
 
   applyRealSparklineSeries(data);
+}
+
+function renderBehaviorDashboard(behavior, previousBehavior) {
+  const summary = behavior.summary || {};
+  const previousSummary = previousBehavior.summary || {};
+  const funnel = behavior.funnel || {};
+  const pages = behavior.pages || [];
+  const channels = behavior.channels || [];
+  const topPaths = behavior.top_paths || [];
+  const topSearchTerms = behavior.top_search_terms || [];
+  const daily = behavior.daily || [];
+
+  const funnelRows = [
+    ["Landing", Number(funnel.landing_views || 0), 100],
+    ["List View", Number(funnel.list_views || 0), funnel.landing_views ? (Number(funnel.list_views || 0) / Number(funnel.landing_views || 1)) * 100 : 0],
+    ["Product View", Number(funnel.product_views || 0), funnel.landing_views ? (Number(funnel.product_views || 0) / Number(funnel.landing_views || 1)) * 100 : 0],
+    ["Add to Cart", Number(funnel.add_to_carts || 0), funnel.landing_views ? (Number(funnel.add_to_carts || 0) / Number(funnel.landing_views || 1)) * 100 : 0],
+    ["Checkout", Number(funnel.begin_checkout || 0), funnel.landing_views ? (Number(funnel.begin_checkout || 0) / Number(funnel.landing_views || 1)) * 100 : 0],
+    ["Purchase", Number(funnel.purchases || 0), funnel.landing_views ? (Number(funnel.purchases || 0) / Number(funnel.landing_views || 1)) * 100 : 0],
+  ];
+
+  const pathRows = topPaths.map((row) => [escapeHtml(row.path), formatInteger(row.sessions)]);
+  const pageRows = pages.map((row) => [
+    `${escapeHtml(row.page_type || "other")}<div class="small-label">${escapeHtml(row.page_url || "(unknown)")}</div>`,
+    formatInteger(row.page_views),
+    formatInteger(row.add_to_carts),
+    formatInteger(row.purchases),
+    `${formatNumber(row.add_to_cart_rate)}%`,
+    `${formatNumber(row.purchase_rate)}%`,
+  ]);
+  const channelRows = channels.map((row) => [
+    prettyChannel(row.channel),
+    formatInteger(row.sessions),
+    formatInteger(row.users),
+    formatInteger(row.add_to_carts),
+    formatInteger(row.checkouts),
+    formatInteger(row.purchases),
+    `${formatNumber(row.purchase_rate)}%`,
+  ]);
+  const searchRows = topSearchTerms.map((row) => [escapeHtml(row.term), formatInteger(row.searches)]);
+  const eventTrendSeries = [
+    { key: "page_view", label: "Page View", color: "#00896b" },
+    { key: "view_item", label: "Product View", color: "#6375d6" },
+    { key: "add_to_cart", label: "Add to Cart", color: "#f59e0b" },
+    { key: "purchase", label: "Purchase", color: "#ec4899" },
+  ].filter((item) => daily.some((row) => Number(row[item.key] || 0) > 0));
+
+  return `
+    <div class="grid cols-5 metric-grid-auto">
+      ${metricCard("Sessions", formatInteger(summary.sessions || 0), compareDelta(summary.sessions, previousSummary.sessions), "Behavior")}
+      ${metricCard("Users", formatInteger(summary.users || 0), compareDelta(summary.users, previousSummary.users), "Behavior")}
+      ${metricCard("Pages / Session", formatNumber(summary.pages_per_session || 0), compareDelta(summary.pages_per_session, previousSummary.pages_per_session), "Behavior")}
+      ${metricCard("加购率", `${formatNumber(summary.add_to_cart_rate || 0)}%`, compareDelta(summary.add_to_cart_rate, previousSummary.add_to_cart_rate), "Behavior")}
+      ${metricCard("购买率", `${formatNumber(summary.purchase_rate || 0)}%`, compareDelta(summary.purchase_rate, previousSummary.purchase_rate), "Behavior")}
+    </div>
+    ${section(
+      "行为漏斗",
+      "看当前时间范围内，用户从进入站点到购买的推进情况。",
+      `${pill("GA4")} ${pill("Behavior Funnel")}`,
+      funnelProgressCard("站内路径漏斗", funnelRows, pill("Behavior")),
+    )}
+    <div class="grid cols-2">
+      ${daily.length && eventTrendSeries.length
+        ? multiLineTrendCard("站内行为趋势", daily, eventTrendSeries)
+        : personaEmptyState("当前时间范围内暂无足够的行为趋势数据")}
+      ${topPaths.length
+        ? compactTableCard("Top 用户路径", ["路径", "Sessions"], pathRows)
+        : personaEmptyState("当前时间范围内暂无可识别的用户路径")}
+    </div>
+    <div class="grid cols-2">
+      ${pages.length
+        ? tableCard("页面表现", ["页面", "PV", "加购", "购买", "加购率", "购买率"], pageRows)
+        : personaEmptyState("当前时间范围内暂无页面行为表现")}
+      ${channels.length
+        ? tableCard("渠道行为表现", ["渠道", "Sessions", "Users", "加购", "结账", "购买", "购买率"], channelRows)
+        : personaEmptyState("当前时间范围内暂无渠道行为数据")}
+    </div>
+    ${section(
+      "高意图动作",
+      "优先识别最值得做再营销或页面优化的行为信号。",
+      `${pill("Behavior")} ${pill("Intent Signals")}`,
+      `
+        <div class="grid cols-2">
+          ${topSearchTerms.length
+            ? compactTableCard("站内搜索高频词", ["搜索词", "次数"], searchRows)
+            : personaEmptyState("当前时间范围内暂无站内搜索词数据")}
+          ${renderBehaviorInsights(summary, funnel, pages, channels)}
+        </div>
+      `,
+    )}
+  `;
+}
+
+function renderBehaviorInsights(summary, funnel, pages, channels) {
+  const insights = [];
+  const topPage = pages[0];
+  const topChannel = channels[0];
+  const addToCartRate = Number(summary.add_to_cart_rate || 0);
+  const purchaseRate = Number(summary.purchase_rate || 0);
+  const checkoutCount = Number(funnel.begin_checkout || 0);
+  const purchaseCount = Number(funnel.purchases || 0);
+  const checkoutCompletion = checkoutCount ? (purchaseCount / checkoutCount) * 100 : 0;
+
+  if (topChannel) insights.push(`${prettyChannel(topChannel.channel)} 当前带来最多会话，Sessions 为 ${formatInteger(topChannel.sessions)}。`);
+  if (topPage) insights.push(`${topPage.page_type || "页面"} ${topPage.page_url || "(unknown)"} 目前是最活跃页面，PV ${formatInteger(topPage.page_views)}。`);
+  insights.push(`当前 Session 加购率为 ${formatNumber(addToCartRate)}%，购买率为 ${formatNumber(purchaseRate)}%。`);
+  if (checkoutCount) insights.push(`从 Begin Checkout 到 Purchase 的完成率约为 ${formatNumber(checkoutCompletion)}%，可以重点关注支付与结账流程。`);
+
+  return `
+    <div class="insight-list">
+      ${insights.map((text) => `<div class="insight-item">${escapeHtml(text)}</div>`).join("")}
+    </div>
+  `;
 }
 
 function applyRealSparklineSeries(data) {

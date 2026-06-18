@@ -14,8 +14,14 @@ module.exports = async function handler(req, res) {
       lineItemRows,
       couponRows,
       customerRows,
+      behaviorRows,
+      previousBehaviorRows,
       ga4Rows,
       previousGa4Rows,
+      trafficRows,
+      previousTrafficRows,
+      searchConsoleRows,
+      previousSearchConsoleRows,
       adRows,
       previousAdRows,
       goalRows,
@@ -32,11 +38,31 @@ module.exports = async function handler(req, res) {
       supabaseFetch("/rest/v1/order_line_items?select=order_id,title,sku,quantity,price&limit=30000"),
       supabaseFetch("/rest/v1/coupon_codes?select=code,category,owner,status&limit=10000"),
       supabaseFetch("/rest/v1/customers?select=id,email,first_name,last_name,last_order_at&limit=20000"),
+      safeSupabaseFetch(
+        `/rest/v1/user_behavior_events?select=event_time,event_name,session_id,user_pseudo_id,customer_id,page_url,page_type,channel_primary,product_id,search_term&event_time=gte.${encodeURIComponent(range.startIso)}&event_time=lte.${encodeURIComponent(range.endIso)}&limit=50000`,
+        [],
+      ),
+      safeSupabaseFetch(
+        `/rest/v1/user_behavior_events?select=event_time,event_name,session_id,user_pseudo_id,customer_id,page_url,page_type,channel_primary,product_id,search_term&event_time=gte.${encodeURIComponent(previousRange.startIso)}&event_time=lte.${encodeURIComponent(previousRange.endIso)}&limit=50000`,
+        [],
+      ),
       supabaseFetch(
         `/rest/v1/ga4_daily_metrics?select=day,sessions,users,add_to_carts,checkouts,purchases&day=gte.${range.start}&day=lte.${range.end}&limit=10000`,
       ),
       supabaseFetch(
         `/rest/v1/ga4_daily_metrics?select=day,sessions,users,add_to_carts,checkouts,purchases&day=gte.${previousRange.start}&day=lte.${previousRange.end}&limit=10000`,
+      ),
+      supabaseFetch(
+        `/rest/v1/traffic_attribution_daily?select=day,channel_primary,channel_secondary,sessions,users,new_users,engaged_sessions,add_to_carts,checkouts,purchases,revenue,clicks,impressions,spend&source_system=eq.ga4&day=gte.${range.start}&day=lte.${range.end}&limit=10000`,
+      ),
+      supabaseFetch(
+        `/rest/v1/traffic_attribution_daily?select=day,channel_primary,channel_secondary,sessions,users,new_users,engaged_sessions,add_to_carts,checkouts,purchases,revenue,clicks,impressions,spend&source_system=eq.ga4&day=gte.${previousRange.start}&day=lte.${previousRange.end}&limit=10000`,
+      ),
+      supabaseFetch(
+        `/rest/v1/search_console_metrics?select=day,dimension_type,dimension_value,clicks,impressions,ctr,position&day=gte.${range.start}&day=lte.${range.end}&limit=30000`,
+      ),
+      supabaseFetch(
+        `/rest/v1/search_console_metrics?select=day,dimension_type,dimension_value,clicks,impressions,ctr,position&day=gte.${previousRange.start}&day=lte.${previousRange.end}&limit=30000`,
       ),
       supabaseFetch(
         `/rest/v1/ad_daily_metrics?select=day,source,spend,revenue,impressions,clicks,purchases&day=gte.${range.start}&day=lte.${range.end}&limit=10000`,
@@ -72,6 +98,8 @@ module.exports = async function handler(req, res) {
     const orderMix = buildOrderMix(orderRows);
     const previousSummary = summarizeOrders(previousOrderRows);
     const previousCustomerQuality = buildCustomerQuality(previousOrderRows);
+    const behavior = buildBehaviorData(behaviorRows);
+    const previousBehavior = buildBehaviorData(previousBehaviorRows);
     const couponUsage = buildCouponUsage(orderRows, couponRows);
     const customerCouponSegments = buildCustomerCouponSegments(orderRows, couponRows);
     const customerChannelQuality = buildCustomerChannelQuality(orderRows);
@@ -79,7 +107,12 @@ module.exports = async function handler(req, res) {
     const referral = buildReferralData(orderRows, couponRows);
     const previousReferral = buildReferralData(previousOrderRows, couponRows);
     const channelSales = buildChannelSales(orderRows);
+    const trafficAttribution = buildTrafficAttributionData(trafficRows);
+    const searchConsole = buildSearchConsoleAttributionData(searchConsoleRows);
     const attribution = buildAttributionData(orderRows, couponRows);
+    const attributionComparison = buildAttributionComparison(trafficAttribution, attribution);
+    const previousTrafficAttribution = buildTrafficAttributionData(previousTrafficRows);
+    const previousSearchConsole = buildSearchConsoleAttributionData(previousSearchConsoleRows);
     const previousAttribution = buildAttributionData(previousOrderRows, couponRows);
     const ga4Funnel = buildGa4Funnel(ga4Rows);
     const previousGa4Funnel = buildGa4Funnel(previousGa4Rows);
@@ -108,9 +141,13 @@ module.exports = async function handler(req, res) {
       top_customers: topCustomers,
       order_mix: orderMix,
       coupon_usage: couponUsage,
+      behavior,
       referral,
       channel_sales: channelSales,
+      traffic_attribution: trafficAttribution,
+      search_console: searchConsole,
       attribution,
+      attribution_comparison: attributionComparison,
       ga4_funnel: ga4Funnel,
       ga4_daily: ga4Daily,
       ad_performance: adPerformance,
@@ -120,12 +157,16 @@ module.exports = async function handler(req, res) {
       previous: {
         range: previousRange,
         summary: previousSummary,
+        behavior: previousBehavior,
         customer_coupon_segments: previousCustomerCouponSegments,
         customer_quality: previousCustomerQuality.summary,
         referral: previousReferral,
+        traffic_attribution: previousTrafficAttribution,
+        search_console: previousSearchConsole,
         attribution: previousAttribution,
         ga4_funnel: previousGa4Funnel,
         ad_performance: previousAdPerformance,
+        behavior: previousBehavior,
       },
       active_goal: activeGoal,
       sync,
@@ -272,6 +313,191 @@ function buildShopifyPersona(rows, customerSummary, orderSummary, customerSegmen
       repeat_rate: number(customerSummary.repeat_rate),
       orders: number(orderSummary.orders),
     },
+  };
+}
+
+function buildBehaviorData(rows) {
+  const safeRows = (rows || [])
+    .map((row) => ({
+      ...row,
+      day: String(row.event_time || "").slice(0, 10),
+    }))
+    .filter((row) => row.day);
+
+  const sessionMap = new Map();
+  const pageMap = new Map();
+  const channelMap = new Map();
+  const dailyMap = new Map();
+  const eventCounts = new Map();
+  const searchTerms = new Map();
+
+  safeRows.forEach((row) => {
+    const eventName = String(row.event_name || "").trim();
+    const sessionId = String(row.session_id || "").trim() || `anon:${row.user_pseudo_id || row.customer_id || row.day}`;
+    const channel = String(row.channel_primary || "").trim() || "unknown";
+    const pageKey = `${row.page_url || "(unknown)"}::${row.page_type || "other"}`;
+
+    eventCounts.set(eventName, (eventCounts.get(eventName) || 0) + 1);
+
+    if (!sessionMap.has(sessionId)) {
+      sessionMap.set(sessionId, {
+        session_id: sessionId,
+        day: row.day,
+        channel,
+        user_pseudo_id: row.user_pseudo_id || "",
+        customer_id: row.customer_id || "",
+        events: [],
+        pages: new Set(),
+      });
+    }
+
+    const session = sessionMap.get(sessionId);
+    session.events.push({
+      event_name: eventName,
+      page_type: row.page_type || "other",
+      page_url: row.page_url || "",
+      product_id: row.product_id || "",
+      search_term: row.search_term || "",
+      event_time: row.event_time || "",
+    });
+    if (row.page_url) session.pages.add(row.page_url);
+
+    if (!pageMap.has(pageKey)) {
+      pageMap.set(pageKey, {
+        page_url: row.page_url || "(unknown)",
+        page_type: row.page_type || "other",
+        page_views: 0,
+        product_views: 0,
+        add_to_carts: 0,
+        purchases: 0,
+      });
+    }
+
+    const pageRow = pageMap.get(pageKey);
+    if (eventName === "page_view") pageRow.page_views += 1;
+    if (eventName === "view_item") pageRow.product_views += 1;
+    if (eventName === "add_to_cart") pageRow.add_to_carts += 1;
+    if (eventName === "purchase") pageRow.purchases += 1;
+
+    if (!channelMap.has(channel)) {
+      channelMap.set(channel, {
+        channel,
+        sessions: new Set(),
+        users: new Set(),
+        add_to_carts: 0,
+        checkouts: 0,
+        purchases: 0,
+      });
+    }
+    const channelRow = channelMap.get(channel);
+    channelRow.sessions.add(sessionId);
+    if (row.user_pseudo_id) channelRow.users.add(row.user_pseudo_id);
+    if (eventName === "add_to_cart") channelRow.add_to_carts += 1;
+    if (eventName === "begin_checkout") channelRow.checkouts += 1;
+    if (eventName === "purchase") channelRow.purchases += 1;
+
+    if (!dailyMap.has(row.day)) {
+      dailyMap.set(row.day, {
+        day: row.day,
+        page_view: 0,
+        view_item: 0,
+        add_to_cart: 0,
+        begin_checkout: 0,
+        purchase: 0,
+      });
+    }
+    const dayRow = dailyMap.get(row.day);
+    if (dayRow[eventName] !== undefined) dayRow[eventName] += 1;
+
+    if (eventName === "site_search" && row.search_term) {
+      searchTerms.set(row.search_term, (searchTerms.get(row.search_term) || 0) + 1);
+    }
+  });
+
+  const sessions = Array.from(sessionMap.values());
+  const sessionCount = sessions.length;
+  const users = new Set(sessions.map((row) => row.user_pseudo_id).filter(Boolean)).size;
+  const productViews = eventCounts.get("view_item") || 0;
+  const addToCarts = eventCounts.get("add_to_cart") || 0;
+  const checkouts = eventCounts.get("begin_checkout") || 0;
+  const purchases = eventCounts.get("purchase") || 0;
+  const pageViews = eventCounts.get("page_view") || 0;
+
+  const topPaths = Array.from(
+    sessions.reduce((acc, session) => {
+      const ordered = session.events
+        .slice()
+        .sort((a, b) => String(a.event_time).localeCompare(String(b.event_time)))
+        .map((event) => event.event_name)
+        .filter(Boolean)
+        .slice(0, 6);
+      if (!ordered.length) return acc;
+      const key = ordered.join(" -> ");
+      const current = acc.get(key) || { path: key, sessions: 0 };
+      current.sessions += 1;
+      acc.set(key, current);
+      return acc;
+    }, new Map()).values(),
+  )
+    .sort((a, b) => b.sessions - a.sessions)
+    .slice(0, 8);
+
+  const pages = Array.from(pageMap.values())
+    .map((row) => ({
+      ...row,
+      add_to_cart_rate: round(row.page_views ? (row.add_to_carts / row.page_views) * 100 : 0),
+      purchase_rate: round(row.page_views ? (row.purchases / row.page_views) * 100 : 0),
+    }))
+    .sort((a, b) => b.page_views - a.page_views || b.add_to_carts - a.add_to_carts)
+    .slice(0, 12);
+
+  const channels = Array.from(channelMap.values())
+    .map((row) => ({
+      channel: row.channel,
+      sessions: row.sessions.size,
+      users: row.users.size,
+      add_to_carts: row.add_to_carts,
+      checkouts: row.checkouts,
+      purchases: row.purchases,
+      purchase_rate: round(row.sessions.size ? (row.purchases / row.sessions.size) * 100 : 0),
+      add_to_cart_rate: round(row.sessions.size ? (row.add_to_carts / row.sessions.size) * 100 : 0),
+    }))
+    .sort((a, b) => b.sessions - a.sessions)
+    .slice(0, 12);
+
+  const topSearchTerms = Array.from(searchTerms.entries())
+    .map(([term, count]) => ({ term, searches: count }))
+    .sort((a, b) => b.searches - a.searches)
+    .slice(0, 10);
+
+  return {
+    summary: {
+      sessions: sessionCount,
+      users,
+      page_views: pageViews,
+      pages_per_session: round(sessionCount ? pageViews / sessionCount : 0),
+      product_views: productViews,
+      add_to_carts: addToCarts,
+      checkouts,
+      purchases,
+      add_to_cart_rate: round(sessionCount ? (addToCarts / sessionCount) * 100 : 0),
+      checkout_rate: round(sessionCount ? (checkouts / sessionCount) * 100 : 0),
+      purchase_rate: round(sessionCount ? (purchases / sessionCount) * 100 : 0),
+    },
+    funnel: {
+      landing_views: pageViews,
+      list_views: eventCounts.get("view_item_list") || 0,
+      product_views: productViews,
+      add_to_carts: addToCarts,
+      cart_views: eventCounts.get("view_cart") || 0,
+      begin_checkout: checkouts,
+      purchases,
+    },
+    pages,
+    channels,
+    top_paths: topPaths,
+    top_search_terms: topSearchTerms,
+    daily: Array.from(dailyMap.values()).sort((a, b) => a.day.localeCompare(b.day)),
   };
 }
 
@@ -891,6 +1117,265 @@ function buildChannelSales(rows) {
     .sort((a, b) => b.revenue - a.revenue);
 }
 
+function buildTrafficAttributionData(rows) {
+  const channelBuckets = new Map();
+  const daily = new Map();
+  const summary = {
+    sessions: 0,
+    users: 0,
+    new_users: 0,
+    engaged_sessions: 0,
+    add_to_carts: 0,
+    checkouts: 0,
+    purchases: 0,
+  };
+
+  rows.forEach((row) => {
+    const channel = String(row.channel_primary || "unknown").trim() || "unknown";
+    const subchannel = String(row.channel_secondary || "—").trim() || "—";
+    const key = `${channel}::${subchannel}`;
+    if (!channelBuckets.has(key)) {
+      channelBuckets.set(key, {
+        channel,
+        subchannel,
+        sessions: 0,
+        users: 0,
+        new_users: 0,
+        engaged_sessions: 0,
+        add_to_carts: 0,
+        checkouts: 0,
+        purchases: 0,
+      });
+    }
+    const bucket = channelBuckets.get(key);
+    bucket.sessions += number(row.sessions);
+    bucket.users += number(row.users);
+    bucket.new_users += number(row.new_users);
+    bucket.engaged_sessions += number(row.engaged_sessions);
+    bucket.add_to_carts += number(row.add_to_carts);
+    bucket.checkouts += number(row.checkouts);
+    bucket.purchases += number(row.purchases);
+
+    summary.sessions += number(row.sessions);
+    summary.users += number(row.users);
+    summary.new_users += number(row.new_users);
+    summary.engaged_sessions += number(row.engaged_sessions);
+    summary.add_to_carts += number(row.add_to_carts);
+    summary.checkouts += number(row.checkouts);
+    summary.purchases += number(row.purchases);
+
+    const day = String(row.day || "").trim();
+    if (!day) return;
+    if (!daily.has(day)) {
+      daily.set(day, {
+        day,
+        direct: 0,
+        organic: 0,
+        ads: 0,
+        edm: 0,
+        community: 0,
+        sns: 0,
+        pr: 0,
+        kol: 0,
+        affiliate: 0,
+        unknown: 0,
+        other: 0,
+      });
+    }
+    const dayBucket = daily.get(day);
+    if (Object.prototype.hasOwnProperty.call(dayBucket, channel)) dayBucket[channel] += number(row.sessions);
+    else dayBucket.other += number(row.sessions);
+  });
+
+  const totalSessions = summary.sessions || 1;
+  const channels = Array.from(channelBuckets.values())
+    .map((row) => ({
+      channel: row.channel,
+      subchannel: row.subchannel,
+      sessions: row.sessions,
+      users: row.users,
+      new_users: row.new_users,
+      engaged_sessions: row.engaged_sessions,
+      add_to_carts: row.add_to_carts,
+      checkouts: row.checkouts,
+      purchases: row.purchases,
+      session_share: round((row.sessions / totalSessions) * 100),
+      cvr: round(row.sessions ? (row.purchases / row.sessions) * 100 : 0),
+      add_to_cart_rate: round(row.sessions ? (row.add_to_carts / row.sessions) * 100 : 0),
+      checkout_rate: round(row.sessions ? (row.checkouts / row.sessions) * 100 : 0),
+    }))
+    .sort((a, b) => b.sessions - a.sessions);
+
+  return {
+    summary: {
+      sessions: summary.sessions,
+      users: summary.users,
+      new_users: summary.new_users,
+      engaged_sessions: summary.engaged_sessions,
+      add_to_carts: summary.add_to_carts,
+      checkouts: summary.checkouts,
+      purchases: summary.purchases,
+      cvr: round(summary.sessions ? (summary.purchases / summary.sessions) * 100 : 0),
+      add_to_cart_rate: round(summary.sessions ? (summary.add_to_carts / summary.sessions) * 100 : 0),
+      checkout_rate: round(summary.sessions ? (summary.checkouts / summary.sessions) * 100 : 0),
+    },
+    channels,
+    daily: Array.from(daily.values()).sort((a, b) => a.day.localeCompare(b.day)),
+  };
+}
+
+function buildSearchConsoleAttributionData(rows) {
+  const summaryRows = rows.filter((row) => row.dimension_type === "summary");
+  const queryRows = rows.filter((row) => row.dimension_type === "query");
+  const pageRows = rows.filter((row) => row.dimension_type === "page");
+  const countryRows = rows.filter((row) => row.dimension_type === "country");
+  const deviceRows = rows.filter((row) => row.dimension_type === "device");
+
+  const summaryByDay = new Map();
+  summaryRows.forEach((row) => {
+    const day = String(row.day || "").trim();
+    if (!day) return;
+    if (!summaryByDay.has(day)) {
+      summaryByDay.set(day, { day, clicks: 0, impressions: 0, weightedCtr: 0, weightedPosition: 0 });
+    }
+    const bucket = summaryByDay.get(day);
+    const impressions = number(row.impressions);
+    bucket.clicks += number(row.clicks);
+    bucket.impressions += impressions;
+    bucket.weightedCtr += number(row.ctr) * impressions;
+    bucket.weightedPosition += number(row.position) * impressions;
+  });
+
+  const daily = Array.from(summaryByDay.values())
+    .map((row) => ({
+      day: row.day,
+      clicks: round(row.clicks),
+      impressions: round(row.impressions),
+      ctr: round(row.impressions ? row.weightedCtr / row.impressions : 0),
+      position: round(row.impressions ? row.weightedPosition / row.impressions : 0),
+    }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+
+  const totals = daily.reduce(
+    (acc, row) => {
+      acc.clicks += number(row.clicks);
+      acc.impressions += number(row.impressions);
+      acc.weightedCtr += number(row.ctr) * number(row.impressions);
+      acc.weightedPosition += number(row.position) * number(row.impressions);
+      return acc;
+    },
+    { clicks: 0, impressions: 0, weightedCtr: 0, weightedPosition: 0 },
+  );
+
+  return {
+    summary: {
+      clicks: round(totals.clicks),
+      impressions: round(totals.impressions),
+      ctr: round(totals.impressions ? totals.weightedCtr / totals.impressions : 0),
+      position: round(totals.impressions ? totals.weightedPosition / totals.impressions : 0),
+    },
+    daily,
+    top_queries: aggregateSearchConsoleDimension(queryRows),
+    top_pages: aggregateSearchConsoleDimension(pageRows),
+    countries: aggregateSearchConsoleDimension(countryRows),
+    devices: aggregateSearchConsoleDimension(deviceRows),
+  };
+}
+
+function aggregateSearchConsoleDimension(rows) {
+  const grouped = new Map();
+  rows.forEach((row) => {
+    const key = String(row.dimension_value || "unknown").trim() || "unknown";
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        name: key,
+        clicks: 0,
+        impressions: 0,
+        weightedCtr: 0,
+        weightedPosition: 0,
+      });
+    }
+    const bucket = grouped.get(key);
+    const impressions = number(row.impressions);
+    bucket.clicks += number(row.clicks);
+    bucket.impressions += impressions;
+    bucket.weightedCtr += number(row.ctr) * impressions;
+    bucket.weightedPosition += number(row.position) * impressions;
+  });
+
+  return Array.from(grouped.values())
+    .map((row) => ({
+      name: row.name,
+      clicks: round(row.clicks),
+      impressions: round(row.impressions),
+      ctr: round(row.impressions ? row.weightedCtr / row.impressions : 0),
+      position: round(row.impressions ? row.weightedPosition / row.impressions : 0),
+    }))
+    .sort((a, b) => b.clicks - a.clicks)
+    .slice(0, 12);
+}
+
+function buildAttributionComparison(trafficAttribution, orderAttribution) {
+  const trafficChannels = trafficAttribution.channels || [];
+  const orderChannels = orderAttribution.channels || [];
+  const merged = new Map();
+
+  trafficChannels.forEach((row) => {
+    const key = row.channel;
+    if (!merged.has(key)) merged.set(key, { channel: key });
+    Object.assign(merged.get(key), {
+      sessions: row.sessions,
+      users: row.users,
+      traffic_cvr: row.cvr,
+      add_to_cart_rate: row.add_to_cart_rate,
+      checkout_rate: row.checkout_rate,
+    });
+  });
+
+  orderChannels.forEach((row) => {
+    const key = row.channel;
+    if (!merged.has(key)) merged.set(key, { channel: key });
+    Object.assign(merged.get(key), {
+      orders: row.orders,
+      revenue: row.revenue,
+      customers: row.customers,
+      order_share: row.order_share,
+      revenue_share: row.revenue_share,
+      aov: row.aov,
+    });
+  });
+
+  return Array.from(merged.values())
+    .map((row) => {
+      const sessions = number(row.sessions);
+      const orders = number(row.orders);
+      const revenue = number(row.revenue);
+      return {
+        channel: row.channel,
+        sessions,
+        users: number(row.users),
+        add_to_carts: number(row.add_to_carts),
+        checkouts: number(row.checkouts),
+        traffic_purchases: number(row.purchases),
+        orders,
+        revenue: round(revenue),
+        customers: number(row.customers),
+        session_to_order_cvr: round(sessions ? (orders / sessions) * 100 : 0),
+        revenue_per_session: round(sessions ? revenue / sessions : 0),
+        traffic_cvr: round(row.traffic_cvr),
+        add_to_cart_rate: round(row.add_to_cart_rate),
+        checkout_rate: round(row.checkout_rate),
+        aov: round(row.aov),
+        session_share: round(
+          (sessions / ((trafficAttribution.summary?.sessions || 0) || 1)) * 100,
+        ),
+        order_share: round(row.order_share),
+        revenue_share: round(row.revenue_share),
+      };
+    })
+    .sort((a, b) => b.sessions - a.sessions);
+}
+
 function buildAttributionData(orderRows, couponRows) {
   const couponMeta = new Map();
   couponRows.forEach((row) => {
@@ -1414,6 +1899,19 @@ async function supabaseFetch(path, options = {}) {
   }
 
   return body || [];
+}
+
+async function safeSupabaseFetch(path, fallback = [], options = {}) {
+  try {
+    return await supabaseFetch(path, options);
+  } catch (error) {
+    const details = error?.details;
+    const message = JSON.stringify(details || {});
+    if (error.statusCode === 404 || /user_behavior_events|behavior/i.test(message)) {
+      return fallback;
+    }
+    throw error;
+  }
 }
 
 function trimSlash(value) {

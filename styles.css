@@ -825,6 +825,78 @@ tr:last-child td {
   line-height: 1.65;
 }
 
+.quadrant-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-bottom: 16px;
+  color: #65707d;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.quadrant-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.quadrant-card {
+  min-width: 0;
+  border-radius: 14px;
+  border: 1px solid var(--line-soft);
+  background: #fff;
+  padding: 18px;
+}
+
+.quadrant-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.quadrant-title {
+  color: #27313d;
+  font-size: 16px;
+  font-weight: 850;
+}
+
+.quadrant-subtitle {
+  color: #6b7480;
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.quadrant-item {
+  padding: 12px 14px;
+}
+
+.quadrant-item-head,
+.quadrant-item-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.quadrant-item-head {
+  margin-bottom: 4px;
+}
+
+.quadrant-item-head strong {
+  color: #27313d;
+  font-size: 14px;
+}
+
+.quadrant-item-head span,
+.quadrant-item-meta span {
+  color: #6b7480;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .hero-goal {
   background: linear-gradient(120deg, #fff 0%, #f4fbf8 74%, #fff8f8 100%);
   padding: 22px;
@@ -1510,7 +1582,8 @@ tr:last-child td {
   .source-tabs,
   .simulator,
   .map-panel,
-  .donut-wrap {
+  .donut-wrap,
+  .quadrant-grid {
     grid-template-columns: 1fr;
   }
 

@@ -99,8 +99,10 @@ async function clearDemoData(shopId) {
     "goals",
     "coupon_codes",
     "audience_segments",
+    "traffic_attribution_daily",
     "ad_daily_metrics",
     "ga4_daily_metrics",
+    "user_behavior_events",
     "refunds",
     "order_line_items",
     "orders",
@@ -340,6 +342,65 @@ function buildDemoPayload(shop, days) {
     };
   });
 
+  const trafficChannelTemplate = [
+    { primary: "ads", secondary: "Paid Social", share: 0.31, purchase_share: 0.24 },
+    { primary: "ads", secondary: "Paid Search", share: 0.18, purchase_share: 0.17 },
+    { primary: "direct", secondary: "Direct", share: 0.2, purchase_share: 0.22 },
+    { primary: "organic", secondary: "Organic Search", share: 0.12, purchase_share: 0.14 },
+    { primary: "edm", secondary: "Email", share: 0.08, purchase_share: 0.1 },
+    { primary: "affiliate", secondary: "Referral", share: 0.06, purchase_share: 0.07 },
+    { primary: "sns", secondary: "Organic Social", share: 0.05, purchase_share: 0.03 },
+  ];
+
+  const trafficDaily = ga4Daily.flatMap((row, index) => {
+    let remainingSessions = row.sessions;
+    let remainingUsers = row.users;
+    let remainingNewUsers = Math.round(row.users * 0.42);
+    let remainingEngaged = Math.round(row.sessions * 0.64);
+    let remainingAddToCarts = row.add_to_carts;
+    let remainingCheckouts = row.checkouts;
+    let remainingPurchases = row.purchases;
+
+    return trafficChannelTemplate.map((channel, channelIndex) => {
+      const isLast = channelIndex === trafficChannelTemplate.length - 1;
+      const sessions = isLast ? remainingSessions : Math.max(0, Math.round(row.sessions * channel.share));
+      const users = isLast ? remainingUsers : Math.max(0, Math.round(row.users * channel.share));
+      const newUsers = isLast ? remainingNewUsers : Math.max(0, Math.round(Math.round(row.users * 0.42) * channel.share));
+      const engaged = isLast ? remainingEngaged : Math.max(0, Math.round(Math.round(row.sessions * 0.64) * channel.share));
+      const addToCarts = isLast ? remainingAddToCarts : Math.max(0, Math.round(row.add_to_carts * channel.share));
+      const checkouts = isLast ? remainingCheckouts : Math.max(0, Math.round(row.checkouts * channel.share));
+      const purchases = isLast ? remainingPurchases : Math.max(0, Math.round(row.purchases * channel.purchase_share));
+
+      remainingSessions -= sessions;
+      remainingUsers -= users;
+      remainingNewUsers -= newUsers;
+      remainingEngaged -= engaged;
+      remainingAddToCarts -= addToCarts;
+      remainingCheckouts -= checkouts;
+      remainingPurchases -= purchases;
+
+      return {
+        shop_id: shop.id,
+        day: row.day,
+        source_system: "ga4",
+        channel_primary: channel.primary,
+        channel_secondary: channel.secondary,
+        sessions,
+        users,
+        new_users: newUsers,
+        engaged_sessions: engaged,
+        add_to_carts: addToCarts,
+        checkouts,
+        purchases,
+        revenue: 0,
+        clicks: 0,
+        impressions: 0,
+        spend: 0,
+        raw: { demo_seed: true, source: "ga4_channel_report", index },
+      };
+    });
+  });
+
   const adCampaigns = [
     { source: "google_ads", id: "demo_google_brand", name: "Google Brand Search", share: 0.38 },
     { source: "google_ads", id: "demo_google_nonbrand", name: "Google Non-brand Search", share: 0.22 },
@@ -477,6 +538,16 @@ function buildDemoPayload(shop, days) {
     },
   ];
 
+  const behaviorEvents = buildBehaviorEvents(shop, {
+    days,
+    today,
+    ga4Daily,
+    trafficDaily,
+    orders,
+    products,
+    channels,
+  });
+
   return {
     customers,
     products: productsRows,
@@ -486,9 +557,251 @@ function buildDemoPayload(shop, days) {
     coupons: couponRows,
     goals,
     ga4Daily,
+    trafficDaily,
     adDaily,
     audience,
+    behaviorEvents,
   };
+}
+
+function buildBehaviorEvents(shop, context) {
+  const { today, ga4Daily, trafficDaily, orders, products } = context;
+  const events = [];
+  const trafficByDay = trafficDaily.reduce((acc, row) => {
+    if (!acc[row.day]) acc[row.day] = [];
+    acc[row.day].push(row);
+    return acc;
+  }, {});
+  const ordersByDay = orders.reduce((acc, row) => {
+    const day = toDateOnly(row.created_at);
+    if (!acc[day]) acc[day] = [];
+    acc[day].push(row);
+    return acc;
+  }, {});
+
+  ga4Daily.forEach((dayRow, dayIndex) => {
+    const day = dayRow.day;
+    const channelRows = (trafficByDay[day] || []).filter((row) => Number(row.sessions || 0) > 0);
+    const dayOrders = ordersByDay[day] || [];
+    const pageViews = Math.max(Number(dayRow.sessions || 0), 12);
+    const listViews = Math.max(Math.round(pageViews * 0.32), 4);
+    const productViews = Math.max(Math.round(pageViews * 0.24), Number(dayRow.purchases || 0));
+    const addToCarts = Math.max(Number(dayRow.add_to_carts || 0), Math.round(productViews * 0.28));
+    const cartViews = Math.max(Math.round(addToCarts * 0.82), 1);
+    const checkoutStarts = Math.max(Number(dayRow.checkouts || 0), Math.round(addToCarts * 0.55));
+    const searchCount = Math.max(Math.round(pageViews * 0.04), 1);
+    const reviewOpenCount = Math.max(Math.round(productViews * 0.18), 1);
+    const faqCount = Math.max(Math.round(productViews * 0.12), 1);
+    const shippingCount = Math.max(Math.round(productViews * 0.1), 1);
+
+    for (let i = 0; i < pageViews; i += 1) {
+      events.push(
+        buildBehaviorEvent(shop.id, day, dayIndex, i, "page_view", {
+          page_url: i % 5 === 0 ? "/collections/juicers" : i % 7 === 0 ? "/products/c16-3-in-1-multi-function-juicer" : "/",
+          page_type: i % 5 === 0 ? "collection" : i % 7 === 0 ? "product" : "home",
+          channel_primary: pickChannel(channelRows, i)?.channel_primary || "direct",
+        }),
+      );
+    }
+
+    for (let i = 0; i < listViews; i += 1) {
+      events.push(
+        buildBehaviorEvent(shop.id, day, dayIndex, 1000 + i, "view_item_list", {
+          page_url: "/collections/juicers",
+          page_type: "collection",
+          collection_id: "juicers",
+          channel_primary: pickChannel(channelRows, i)?.channel_primary || "organic",
+        }),
+      );
+    }
+
+    for (let i = 0; i < productViews; i += 1) {
+      const product = products[i % products.length];
+      events.push(
+        buildBehaviorEvent(shop.id, day, dayIndex, 2000 + i, "view_item", {
+          page_url: `/products/${slugify(product.title)}`,
+          page_type: "product",
+          product_id: product.id,
+          variant_id: `${product.id}_v1`,
+          channel_primary: pickChannel(channelRows, i)?.channel_primary || "organic",
+        }),
+      );
+    }
+
+    for (let i = 0; i < addToCarts; i += 1) {
+      const product = products[(i + 1) % products.length];
+      events.push(
+        buildBehaviorEvent(shop.id, day, dayIndex, 3000 + i, "add_to_cart", {
+          page_url: `/products/${slugify(product.title)}`,
+          page_type: "product",
+          product_id: product.id,
+          variant_id: `${product.id}_v1`,
+          value: product.price,
+          channel_primary: pickChannel(channelRows, i)?.channel_primary || "ads",
+        }),
+      );
+    }
+
+    for (let i = 0; i < cartViews; i += 1) {
+      events.push(
+        buildBehaviorEvent(shop.id, day, dayIndex, 4000 + i, "view_cart", {
+          page_url: "/cart",
+          page_type: "cart",
+          channel_primary: pickChannel(channelRows, i)?.channel_primary || "direct",
+        }),
+      );
+    }
+
+    for (let i = 0; i < checkoutStarts; i += 1) {
+      events.push(
+        buildBehaviorEvent(shop.id, day, dayIndex, 5000 + i, "begin_checkout", {
+          page_url: "/checkout",
+          page_type: "checkout",
+          value: round(89 + pseudo(dayIndex * 37 + i) * 180),
+          channel_primary: pickChannel(channelRows, i)?.channel_primary || "direct",
+        }),
+      );
+    }
+
+    for (let i = 0; i < searchCount; i += 1) {
+      const terms = ["cold press juicer", "portable juicer", "juicer bundle", "replacement filter", "smoothie maker"];
+      events.push(
+        buildBehaviorEvent(shop.id, day, dayIndex, 6000 + i, "site_search", {
+          page_url: "/search",
+          page_type: "search",
+          search_term: terms[i % terms.length],
+          channel_primary: pickChannel(channelRows, i)?.channel_primary || "organic",
+        }),
+      );
+    }
+
+    for (let i = 0; i < reviewOpenCount; i += 1) {
+      const product = products[(i + 2) % products.length];
+      events.push(
+        buildBehaviorEvent(shop.id, day, dayIndex, 7000 + i, "review_opened", {
+          page_url: `/products/${slugify(product.title)}`,
+          page_type: "product",
+          product_id: product.id,
+          channel_primary: pickChannel(channelRows, i)?.channel_primary || "sns",
+        }),
+      );
+    }
+
+    for (let i = 0; i < faqCount; i += 1) {
+      const product = products[(i + 3) % products.length];
+      events.push(
+        buildBehaviorEvent(shop.id, day, dayIndex, 8000 + i, "faq_opened", {
+          page_url: `/products/${slugify(product.title)}`,
+          page_type: "product",
+          product_id: product.id,
+          channel_primary: pickChannel(channelRows, i)?.channel_primary || "edm",
+        }),
+      );
+    }
+
+    for (let i = 0; i < shippingCount; i += 1) {
+      const product = products[(i + 4) % products.length];
+      events.push(
+        buildBehaviorEvent(shop.id, day, dayIndex, 9000 + i, "shipping_info_opened", {
+          page_url: `/products/${slugify(product.title)}`,
+          page_type: "product",
+          product_id: product.id,
+          channel_primary: pickChannel(channelRows, i)?.channel_primary || "affiliate",
+        }),
+      );
+    }
+
+    dayOrders.forEach((order, index) => {
+      events.push(
+        buildBehaviorEvent(shop.id, day, dayIndex, 10000 + index, "purchase", {
+          event_time: order.created_at,
+          session_id: `demo_purchase_session_${dayIndex}_${index + 1}`,
+          user_pseudo_id: `demo_user_${((dayIndex * 97 + index) % 2200) + 1}`,
+          customer_id: order.customer_id,
+          page_url: "/checkout/thank-you",
+          page_type: "checkout",
+          channel_primary: normalizeBehaviorChannel(order.source_name),
+          product_id: null,
+          value: order.total_price,
+          properties: {
+            order_id: order.id,
+            order_name: order.name,
+            discount_codes: order.discount_codes || [],
+          },
+        }),
+      );
+    });
+  });
+
+  return events;
+}
+
+function buildBehaviorEvent(shopId, day, dayIndex, sequence, eventName, extras = {}) {
+  const hour = 8 + (sequence % 12);
+  const minute = (sequence * 7) % 60;
+  const second = (sequence * 13) % 60;
+  const eventTime =
+    extras.event_time ||
+    `${day}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}.000Z`;
+  const sessionNumber = Math.max(1, Math.floor(sequence / 3) + 1);
+  const pseudoId = `demo_user_${((dayIndex * 91 + sequence) % 2200) + 1}`;
+  return {
+    id: demoUuid(`behavior-${day}-${eventName}-${sequence}`),
+    shop_id: shopId,
+    event_time: eventTime,
+    event_name: eventName,
+    session_id: extras.session_id || `demo_session_${day.replace(/-/g, "")}_${sessionNumber}`,
+    user_pseudo_id: extras.user_pseudo_id || pseudoId,
+    customer_id: extras.customer_id || null,
+    page_url: extras.page_url || "/",
+    page_type: extras.page_type || "other",
+    referrer: extras.referrer || "",
+    channel_primary: extras.channel_primary || "direct",
+    device_category: extras.device_category || pickDevice(sequence),
+    country: extras.country || "",
+    city: extras.city || "",
+    product_id: extras.product_id || null,
+    variant_id: extras.variant_id || null,
+    collection_id: extras.collection_id || null,
+    search_term: extras.search_term || null,
+    value: Number(extras.value || 0),
+    currency: "USD",
+    properties: {
+      demo_seed: true,
+      ...(extras.properties || {}),
+    },
+  };
+}
+
+function pickChannel(rows, seed) {
+  if (!rows.length) return null;
+  return rows[seed % rows.length];
+}
+
+function pickDevice(seed) {
+  const devices = ["mobile", "desktop", "tablet"];
+  if (seed % 12 === 0) return "tablet";
+  if (seed % 4 === 0) return "desktop";
+  return devices[0];
+}
+
+function normalizeBehaviorChannel(sourceName) {
+  const source = String(sourceName || "").toLowerCase();
+  if (source.includes("social")) return "ads";
+  if (source.includes("search")) return "ads";
+  if (source.includes("email")) return "edm";
+  if (source.includes("referral")) return "affiliate";
+  if (source.includes("organic")) return "organic";
+  return "direct";
+}
+
+function demoUuid(seed) {
+  const hex = Buffer.from(String(seed))
+    .toString("hex")
+    .replace(/[^a-f0-9]/g, "")
+    .padEnd(32, "0")
+    .slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
 function buildAudienceSet(shopId, source, day, segmentType, rows, withAffinity = false) {
@@ -517,8 +830,10 @@ async function upsertDemoData(shop, payload) {
   await upsertBatch("coupon_codes", payload.coupons, "shop_id,code");
   await upsertBatch("goals", payload.goals, "id");
   await upsertBatch("ga4_daily_metrics", payload.ga4Daily, "shop_id,day,device,country,city");
+  await upsertBatch("traffic_attribution_daily", payload.trafficDaily, "shop_id,day,source_system,channel_primary,channel_secondary");
   await upsertBatch("ad_daily_metrics", payload.adDaily, "shop_id,source,day,campaign_id");
   await upsertBatch("audience_segments", payload.audience, "shop_id,source,segment_type,segment_name,day");
+  await upsertBatch("user_behavior_events", payload.behaviorEvents, "id");
 
   await touchIntegration(shop.id, "shopify", "connected", {
     shop_domain: shop.shop_domain,
@@ -554,8 +869,10 @@ function summarizePayload(payload) {
     refunds: payload.refunds.length,
     coupons: payload.coupons.length,
     ga4_daily_rows: payload.ga4Daily.length,
+    traffic_daily_rows: payload.trafficDaily.length,
     ad_daily_rows: payload.adDaily.length,
     audience_rows: payload.audience.length,
+    behavior_event_rows: payload.behaviorEvents.length,
     goals: payload.goals.length,
   };
 }
