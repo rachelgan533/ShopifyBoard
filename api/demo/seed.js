@@ -702,157 +702,332 @@ function buildBehaviorEvents(shop, context) {
     const day = dayRow.day;
     const channelRows = (trafficByDay[day] || []).filter((row) => Number(row.sessions || 0) > 0);
     const dayOrders = ordersByDay[day] || [];
-    const pageViews = Math.max(Number(dayRow.sessions || 0), 12);
-    const listViews = Math.max(Math.round(pageViews * 0.32), 4);
-    const productViews = Math.max(Math.round(pageViews * 0.24), Number(dayRow.purchases || 0));
-    const addToCarts = Math.max(Number(dayRow.add_to_carts || 0), Math.round(productViews * 0.28));
-    const cartViews = Math.max(Math.round(addToCarts * 0.82), 1);
-    const checkoutStarts = Math.max(Number(dayRow.checkouts || 0), Math.round(addToCarts * 0.55));
-    const searchCount = Math.max(Math.round(pageViews * 0.04), 1);
-    const reviewOpenCount = Math.max(Math.round(productViews * 0.18), 1);
-    const faqCount = Math.max(Math.round(productViews * 0.12), 1);
-    const shippingCount = Math.max(Math.round(productViews * 0.1), 1);
+    const sessionCount = Math.max(Math.min(Math.round(Number(dayRow.sessions || 0) * 0.22), 360), 96);
+    const targetAddToCarts = Math.max(Number(dayRow.add_to_carts || 0), Math.round(sessionCount * 0.12));
+    const targetCheckouts = Math.max(Number(dayRow.checkouts || 0), Math.round(targetAddToCarts * 0.55));
+    const targetPurchases = Math.min(dayOrders.length, targetCheckouts);
+    const targetSearches = Math.max(Math.round(sessionCount * 0.11), 6);
+    const targetReviews = Math.max(Math.round(sessionCount * 0.13), 8);
+    const targetFaqs = Math.max(Math.round(sessionCount * 0.1), 6);
+    const targetShipping = Math.max(Math.round(sessionCount * 0.08), 5);
 
-    for (let i = 0; i < pageViews; i += 1) {
-      events.push(
-        buildBehaviorEvent(shop.id, day, dayIndex, i, "page_view", {
-          page_url: i % 5 === 0 ? "/collections/juicers" : i % 7 === 0 ? "/products/c16-3-in-1-multi-function-juicer" : "/",
-          page_type: i % 5 === 0 ? "collection" : i % 7 === 0 ? "product" : "home",
-          channel_primary: pickChannel(channelRows, i)?.channel_primary || "direct",
-        }),
-      );
+    const purchaseSessions = targetPurchases;
+    const checkoutAbandonSessions = Math.max(targetCheckouts - targetPurchases, Math.round(sessionCount * 0.09));
+    const cartAbandonSessions = Math.max(targetAddToCarts - targetCheckouts, Math.round(sessionCount * 0.12));
+    const deepBrowseSessions = Math.max(Math.round(sessionCount * 0.18), 14);
+    const searchIntentSessions = Math.max(targetSearches, Math.round(sessionCount * 0.1));
+    const listBrowseSessions = Math.max(Math.round(sessionCount * 0.16), 12);
+    let bounceSessions =
+      sessionCount -
+      purchaseSessions -
+      checkoutAbandonSessions -
+      cartAbandonSessions -
+      deepBrowseSessions -
+      searchIntentSessions -
+      listBrowseSessions;
+    if (bounceSessions < Math.round(sessionCount * 0.12)) {
+      bounceSessions = Math.round(sessionCount * 0.12);
     }
 
-    for (let i = 0; i < listViews; i += 1) {
-      events.push(
-        buildBehaviorEvent(shop.id, day, dayIndex, 1000 + i, "view_item_list", {
-          page_url: "/collections/juicers",
+    const sessionTypes = [
+      ...Array(bounceSessions).fill("bounce"),
+      ...Array(listBrowseSessions).fill("list_browse"),
+      ...Array(deepBrowseSessions).fill("deep_browse"),
+      ...Array(searchIntentSessions).fill("search_intent"),
+      ...Array(cartAbandonSessions).fill("cart_abandon"),
+      ...Array(checkoutAbandonSessions).fill("checkout_abandon"),
+      ...Array(purchaseSessions).fill("purchase"),
+    ].slice(0, sessionCount);
+
+    while (sessionTypes.length < sessionCount) sessionTypes.push("list_browse");
+
+    const searchTerms = [
+      "cold press juicer",
+      "portable juicer",
+      "juicer bundle",
+      "replacement filter",
+      "smoothie maker",
+      "best juicer for celery",
+    ];
+
+    let reviewBudget = targetReviews;
+    let faqBudget = targetFaqs;
+    let shippingBudget = targetShipping;
+    let searchBudget = targetSearches;
+    let eventSequence = 0;
+
+    sessionTypes.forEach((type, sessionIndex) => {
+      const channelRow = pickWeightedChannel(channelRows, dayIndex * 1000 + sessionIndex) || pickChannel(channelRows, sessionIndex);
+      const channel = channelRow?.channel_primary || "direct";
+      const sessionId = `demo_behavior_${day.replace(/-/g, "")}_${String(sessionIndex + 1).padStart(4, "0")}`;
+      const pseudoId = `demo_user_${((dayIndex * 193 + sessionIndex) % 4200) + 1}`;
+      const product = products[(dayIndex * 7 + sessionIndex * 3) % products.length];
+      const productUrl = `/products/${slugify(product.title)}`;
+      const collectionUrl = "/collections/juicers";
+      const homeUrl = sessionIndex % 4 === 0 ? "/collections/bestsellers" : "/";
+      const order = type === "purchase" ? dayOrders[sessionIndex % Math.max(dayOrders.length, 1)] : null;
+
+      const sessionEvents = [
+        { event_name: "page_view", page_url: homeUrl, page_type: homeUrl === "/" ? "home" : "collection" },
+        {
+          event_name: "module_view",
+          page_url: homeUrl,
+          page_type: homeUrl === "/" ? "home" : "collection",
+          properties: {
+            module_id: "home_hero_primary",
+            module_type: "hero",
+            module_name: "首页首屏主推",
+            module_position: "home_hero_1",
+          },
+        },
+      ];
+
+      if (type !== "bounce") {
+        sessionEvents.push({
+          event_name: "view_item_list",
+          page_url: collectionUrl,
           page_type: "collection",
           collection_id: "juicers",
-          channel_primary: pickChannel(channelRows, i)?.channel_primary || "organic",
-        }),
-      );
-    }
+        });
+        sessionEvents.push({
+          event_name: "module_view",
+          page_url: collectionUrl,
+          page_type: "collection",
+          properties: {
+            module_id: "collection_recommendation_grid",
+            module_type: "recommendation",
+            module_name: "集合页商品推荐",
+            module_position: "collection_grid",
+          },
+        });
+      }
 
-    for (let i = 0; i < productViews; i += 1) {
-      const product = products[i % products.length];
-      events.push(
-        buildBehaviorEvent(shop.id, day, dayIndex, 2000 + i, "view_item", {
-          page_url: `/products/${slugify(product.title)}`,
+      if (["deep_browse", "search_intent", "cart_abandon", "checkout_abandon", "purchase"].includes(type)) {
+        sessionEvents.push({
+          event_name: "view_item",
+          page_url: productUrl,
           page_type: "product",
           product_id: product.id,
           variant_id: `${product.id}_v1`,
-          channel_primary: pickChannel(channelRows, i)?.channel_primary || "organic",
-        }),
-      );
-    }
+        });
+        sessionEvents.push({
+          event_name: "module_view",
+          page_url: productUrl,
+          page_type: "product",
+          product_id: product.id,
+          properties: {
+            module_id: "pdp_sticky_atc",
+            module_type: "add_to_cart",
+            module_name: "商品页悬浮加购",
+            module_position: "pdp_sticky_bottom",
+          },
+        });
+      }
 
-    for (let i = 0; i < addToCarts; i += 1) {
-      const product = products[(i + 1) % products.length];
-      events.push(
-        buildBehaviorEvent(shop.id, day, dayIndex, 3000 + i, "add_to_cart", {
-          page_url: `/products/${slugify(product.title)}`,
+      if ((type === "search_intent" || (type === "deep_browse" && searchBudget > 0)) && searchBudget > 0) {
+        sessionEvents.splice(1, 0, {
+          event_name: "site_search",
+          page_url: "/search",
+          page_type: "search",
+          search_term: searchTerms[(dayIndex + sessionIndex) % searchTerms.length],
+        });
+        sessionEvents.splice(2, 0, {
+          event_name: "module_submit",
+          page_url: "/search",
+          page_type: "search",
+          search_term: searchTerms[(dayIndex + sessionIndex) % searchTerms.length],
+          properties: {
+            module_id: "header_search",
+            module_type: "search",
+            module_name: "顶部搜索框",
+            module_position: "header",
+          },
+        });
+        searchBudget -= 1;
+      }
+
+      if (["deep_browse", "cart_abandon", "checkout_abandon", "purchase"].includes(type) && reviewBudget > 0) {
+        sessionEvents.push({
+          event_name: "module_view",
+          page_url: productUrl,
+          page_type: "product",
+          product_id: product.id,
+          properties: {
+            module_id: "pdp_reviews",
+            module_type: "review",
+            module_name: "商品评价模块",
+            module_position: "pdp_below_gallery",
+          },
+        });
+        sessionEvents.push({
+          event_name: "module_expand",
+          page_url: productUrl,
+          page_type: "product",
+          product_id: product.id,
+          properties: {
+            module_id: "pdp_reviews",
+            module_type: "review",
+            module_name: "商品评价模块",
+            module_position: "pdp_below_gallery",
+          },
+        });
+        sessionEvents.push({
+          event_name: "review_opened",
+          page_url: productUrl,
+          page_type: "product",
+          product_id: product.id,
+        });
+        reviewBudget -= 1;
+      }
+
+      if (["deep_browse", "checkout_abandon", "purchase"].includes(type) && faqBudget > 0) {
+        sessionEvents.push({
+          event_name: "module_expand",
+          page_url: productUrl,
+          page_type: "product",
+          product_id: product.id,
+          properties: {
+            module_id: "pdp_faq",
+            module_type: "faq",
+            module_name: "商品 FAQ",
+            module_position: "pdp_detail_tabs",
+          },
+        });
+        sessionEvents.push({
+          event_name: "faq_opened",
+          page_url: productUrl,
+          page_type: "product",
+          product_id: product.id,
+        });
+        faqBudget -= 1;
+      }
+
+      if (["checkout_abandon", "purchase"].includes(type) && shippingBudget > 0) {
+        sessionEvents.push({
+          event_name: "module_expand",
+          page_url: productUrl,
+          page_type: "product",
+          product_id: product.id,
+          properties: {
+            module_id: "pdp_shipping_info",
+            module_type: "shipping",
+            module_name: "配送与退换说明",
+            module_position: "pdp_detail_tabs",
+          },
+        });
+        sessionEvents.push({
+          event_name: "shipping_info_opened",
+          page_url: productUrl,
+          page_type: "product",
+          product_id: product.id,
+        });
+        shippingBudget -= 1;
+      }
+
+      if (["cart_abandon", "checkout_abandon", "purchase"].includes(type)) {
+        sessionEvents.push({
+          event_name: "module_click",
+          page_url: productUrl,
+          page_type: "product",
+          product_id: product.id,
+          properties: {
+            module_id: "pdp_sticky_atc",
+            module_type: "add_to_cart",
+            module_name: "商品页悬浮加购",
+            module_position: "pdp_sticky_bottom",
+          },
+        });
+        sessionEvents.push({
+          event_name: "add_to_cart",
+          page_url: productUrl,
           page_type: "product",
           product_id: product.id,
           variant_id: `${product.id}_v1`,
           value: product.price,
-          channel_primary: pickChannel(channelRows, i)?.channel_primary || "ads",
-        }),
-      );
-    }
-
-    for (let i = 0; i < cartViews; i += 1) {
-      events.push(
-        buildBehaviorEvent(shop.id, day, dayIndex, 4000 + i, "view_cart", {
+        });
+        sessionEvents.push({
+          event_name: "view_cart",
           page_url: "/cart",
           page_type: "cart",
-          channel_primary: pickChannel(channelRows, i)?.channel_primary || "direct",
-        }),
-      );
-    }
+        });
+        sessionEvents.push({
+          event_name: "module_view",
+          page_url: "/cart",
+          page_type: "cart",
+          properties: {
+            module_id: "cart_bundle_upsell",
+            module_type: "upsell",
+            module_name: "购物车 Bundle 推荐",
+            module_position: "cart_drawer_bottom",
+          },
+        });
+      }
 
-    for (let i = 0; i < checkoutStarts; i += 1) {
-      events.push(
-        buildBehaviorEvent(shop.id, day, dayIndex, 5000 + i, "begin_checkout", {
+      if (["checkout_abandon", "purchase"].includes(type)) {
+        sessionEvents.push({
+          event_name: "begin_checkout",
           page_url: "/checkout",
           page_type: "checkout",
-          value: round(89 + pseudo(dayIndex * 37 + i) * 180),
-          channel_primary: pickChannel(channelRows, i)?.channel_primary || "direct",
-        }),
-      );
-    }
+          value: round(89 + pseudo(dayIndex * 37 + sessionIndex) * 180),
+        });
+      }
 
-    for (let i = 0; i < searchCount; i += 1) {
-      const terms = ["cold press juicer", "portable juicer", "juicer bundle", "replacement filter", "smoothie maker"];
-      events.push(
-        buildBehaviorEvent(shop.id, day, dayIndex, 6000 + i, "site_search", {
-          page_url: "/search",
-          page_type: "search",
-          search_term: terms[i % terms.length],
-          channel_primary: pickChannel(channelRows, i)?.channel_primary || "organic",
-        }),
-      );
-    }
-
-    for (let i = 0; i < reviewOpenCount; i += 1) {
-      const product = products[(i + 2) % products.length];
-      events.push(
-        buildBehaviorEvent(shop.id, day, dayIndex, 7000 + i, "review_opened", {
-          page_url: `/products/${slugify(product.title)}`,
-          page_type: "product",
-          product_id: product.id,
-          channel_primary: pickChannel(channelRows, i)?.channel_primary || "sns",
-        }),
-      );
-    }
-
-    for (let i = 0; i < faqCount; i += 1) {
-      const product = products[(i + 3) % products.length];
-      events.push(
-        buildBehaviorEvent(shop.id, day, dayIndex, 8000 + i, "faq_opened", {
-          page_url: `/products/${slugify(product.title)}`,
-          page_type: "product",
-          product_id: product.id,
-          channel_primary: pickChannel(channelRows, i)?.channel_primary || "edm",
-        }),
-      );
-    }
-
-    for (let i = 0; i < shippingCount; i += 1) {
-      const product = products[(i + 4) % products.length];
-      events.push(
-        buildBehaviorEvent(shop.id, day, dayIndex, 9000 + i, "shipping_info_opened", {
-          page_url: `/products/${slugify(product.title)}`,
-          page_type: "product",
-          product_id: product.id,
-          channel_primary: pickChannel(channelRows, i)?.channel_primary || "affiliate",
-        }),
-      );
-    }
-
-    dayOrders.forEach((order, index) => {
-      events.push(
-        buildBehaviorEvent(shop.id, day, dayIndex, 10000 + index, "purchase", {
+      if (type === "purchase" && order) {
+        sessionEvents.push({
+          event_name: "purchase",
           event_time: order.created_at,
-          session_id: `demo_purchase_session_${dayIndex}_${index + 1}`,
-          user_pseudo_id: `demo_user_${((dayIndex * 97 + index) % 2200) + 1}`,
-          customer_id: order.customer_id,
           page_url: "/checkout/thank-you",
           page_type: "checkout",
-          channel_primary: normalizeBehaviorChannel(order.source_name),
-          product_id: null,
+          customer_id: order.customer_id,
           value: order.total_price,
           properties: {
             order_id: order.id,
             order_name: order.name,
             discount_codes: order.discount_codes || [],
           },
-        }),
-      );
+        });
+      }
+
+      sessionEvents.forEach((event, eventIndex) => {
+        events.push(
+          buildBehaviorEvent(shop.id, day, dayIndex, eventSequence, event.event_name, {
+            session_id: sessionId,
+            user_pseudo_id: order?.customer_id ? `demo_customer_user_${order.customer_id}` : pseudoId,
+            customer_id: event.customer_id || order?.customer_id || null,
+            page_url: event.page_url,
+            page_type: event.page_type,
+            channel_primary: event.event_name === "purchase" && order ? normalizeBehaviorChannel(order.source_name) : channel,
+            product_id: event.product_id || null,
+            variant_id: event.variant_id || null,
+            collection_id: event.collection_id || null,
+            search_term: event.search_term || null,
+            value: Number(event.value || 0),
+            event_time: event.event_time,
+            properties: {
+              session_type: type,
+              demo_path: sessionEvents.map((item) => item.event_name),
+              ...(event.properties || {}),
+            },
+          }),
+        );
+        eventSequence += 1;
+      });
     });
   });
 
   return events;
+}
+
+function pickWeightedChannel(rows, seed) {
+  if (!rows?.length) return null;
+  const total = rows.reduce((sum, row) => sum + Math.max(Number(row.sessions || 0), 0), 0);
+  if (!total) return rows[seed % rows.length];
+  let cursor = pseudo(seed) * total;
+  for (const row of rows) {
+    cursor -= Math.max(Number(row.sessions || 0), 0);
+    if (cursor <= 0) return row;
+  }
+  return rows[rows.length - 1];
 }
 
 function buildBehaviorEvent(shopId, day, dayIndex, sequence, eventName, extras = {}) {

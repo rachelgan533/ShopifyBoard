@@ -165,6 +165,7 @@ order by revenue desc;
 - [supabase-sql-parts/06-user-behavior-analytics-01-tables.sql](/Users/rachel/Documents/Codex/2026-06-09/vercel-supabase-shopify/supabase-sql-parts/06-user-behavior-analytics-01-tables.sql)
 - [supabase-sql-parts/06-user-behavior-analytics-02-views-a.sql](/Users/rachel/Documents/Codex/2026-06-09/vercel-supabase-shopify/supabase-sql-parts/06-user-behavior-analytics-02-views-a.sql)
 - [supabase-sql-parts/06-user-behavior-analytics-03-views-b.sql](/Users/rachel/Documents/Codex/2026-06-09/vercel-supabase-shopify/supabase-sql-parts/06-user-behavior-analytics-03-views-b.sql)
+- [supabase-sql-parts/07-module-behavior-events.sql](/Users/rachel/Documents/Codex/2026-06-09/vercel-supabase-shopify/supabase-sql-parts/07-module-behavior-events.sql)
 
 这部分会新增：
 
@@ -179,7 +180,8 @@ order by revenue desc;
 
 1. 先建行为事件表
 2. 再接 Shopify Pixel / GA4 事件
-3. 再做用户行为分析看板
+3. 再执行 `07-module-behavior-events.sql`，加入页面模块曝光、点击、展开、提交事件
+4. 再做用户行为分析看板
 
 ### 行为事件写入接口
 
@@ -221,6 +223,50 @@ BEHAVIOR_WRITE_KEY=一串给前端像素使用的写入密钥
   ]
 }
 ```
+
+### 页面模块转化影响分析
+
+如果要判断首页 Hero、商品评价、FAQ、配送说明、悬浮加购、购物车推荐等模块是否提升转化，在原有行为事件之外继续上报模块事件：
+
+```json
+{
+  "event_name": "module_view",
+  "session_id": "sess_001",
+  "user_pseudo_id": "anon_001",
+  "page_url": "/products/c16-3-in-1-multi-function-juicer",
+  "page_type": "product",
+  "product_id": "gid://shopify/Product/1234567890",
+  "module_id": "pdp_reviews",
+  "module_type": "review",
+  "module_name": "商品评价模块",
+  "module_position": "pdp_below_gallery"
+}
+```
+
+支持的模块事件：
+
+- `module_view`：模块进入可视区域或确定被展示
+- `module_click`：模块中的 CTA、推荐商品、按钮被点击
+- `module_expand`：评价、FAQ、配送说明、规格表等被展开
+- `module_submit`：搜索、订阅、问卷等被提交
+- `module_dismiss`：弹窗、优惠提醒等被关闭
+
+前台建议用：
+
+- `localStorage` 保存 `user_pseudo_id`
+- `sessionStorage` 保存 `session_id`
+- 下单或登录后补 `customer_id`
+- 可参考埋点脚本：
+  [docs/module-behavior-tracking.js](/Users/rachel/Documents/Codex/2026-06-09/vercel-supabase-shopify/docs/module-behavior-tracking.js)
+
+用户行为分析页会按 Session 自动计算：
+
+- 模块曝光 Sessions
+- 模块互动率
+- 触达模块后的购买率
+- 未触达模块的购买率
+- 转化率提升百分点
+- Revenue / Session
 
 可以通过以下任一方式鉴权：
 

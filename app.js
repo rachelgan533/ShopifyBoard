@@ -348,6 +348,12 @@ function metricKey(label) {
     加购率: "add_to_cart_rate",
     结账率: "checkout_rate",
     支付完成率: "payment_completion_rate",
+    流量会话: "traffic_sessions",
+    流量用户: "traffic_users",
+    流量转化: "traffic_cvr",
+    归因订单: "attribution_orders",
+    归因销售额: "attribution_revenue",
+    "Last Click 就绪": "attribution_ready_orders",
   }[label];
 }
 
@@ -1101,24 +1107,30 @@ function renderAttributionDashboard(data) {
   const trafficTrendRows = trafficAttribution.daily || [];
   const trendRows = attribution.daily || [];
   const efficiencyQuadrants = buildAttributionEfficiencyQuadrants(attributionComparison);
+  const trafficSessionsSeries = trafficTrendRows.map((row) => ({ label: row.day, value: Number(row.sessions_total || 0) }));
+  const trafficUsersSeries = trafficTrendRows.map((row) => ({ label: row.day, value: Number(row.users_total || 0) }));
+  const trafficCvrSeries = trafficTrendRows.map((row) => ({ label: row.day, value: Number(row.cvr || 0) }));
+  const attributionOrdersSeries = trendRows.map((row) => ({ label: row.day, value: Number(row.orders_total || 0) }));
+  const attributionRevenueSeries = trendRows.map((row) => ({ label: row.day, value: Number(row.revenue_total || 0) }));
+  const attributionReadySeries = trendRows.map((row) => ({ label: row.day, value: Number(row.ready_orders || 0) }));
 
   const overviewCards = [
-    metricCard("流量会话", formatInteger(trafficSummary.sessions), compareDelta(trafficSummary.sessions, previousTrafficAttribution.summary?.sessions), "GA4"),
-    metricCard("流量用户", formatInteger(trafficSummary.users), compareDelta(trafficSummary.users, previousTrafficAttribution.summary?.users), "GA4"),
-    metricCard("流量转化", `${formatNumber(trafficSummary.cvr)}%`, compareDelta(trafficSummary.cvr, previousTrafficAttribution.summary?.cvr), "GA4"),
-    metricCard("归因订单", formatInteger(summary.orders), compareDelta(summary.orders, previousAttribution.summary?.orders), "Shopify"),
-    metricCard("归因销售额", formatCurrency(summary.revenue), compareDelta(summary.revenue, previousAttribution.summary?.revenue), "Shopify"),
-    metricCard("Last Click 就绪", formatInteger(quality.ready_orders), compareDelta(quality.ready_orders, previousAttribution.quality?.ready_orders), "Shopify"),
+    metricCard("流量会话", formatInteger(trafficSummary.sessions), compareDelta(trafficSummary.sessions, previousTrafficAttribution.summary?.sessions), "GA4", trafficSessionsSeries),
+    metricCard("流量用户", formatInteger(trafficSummary.users), compareDelta(trafficSummary.users, previousTrafficAttribution.summary?.users), "GA4", trafficUsersSeries),
+    metricCard("流量转化", `${formatNumber(trafficSummary.cvr)}%`, compareDelta(trafficSummary.cvr, previousTrafficAttribution.summary?.cvr), "GA4", trafficCvrSeries),
+    metricCard("归因订单", formatInteger(summary.orders), compareDelta(summary.orders, previousAttribution.summary?.orders), "Shopify", attributionOrdersSeries),
+    metricCard("归因销售额", formatCurrency(summary.revenue), compareDelta(summary.revenue, previousAttribution.summary?.revenue), "Shopify", attributionRevenueSeries),
+    metricCard("Last Click 就绪", formatInteger(quality.ready_orders), compareDelta(quality.ready_orders, previousAttribution.quality?.ready_orders), "Shopify", attributionReadySeries),
   ];
 
-  const trafficSessionRows = trafficChannelRows.slice(0, 8).map((row) => [prettyChannel(row.channel), Number(row.sessions || 0), formatInteger(row.sessions)]);
-  const trafficCvrRows = trafficChannelRows.slice(0, 8).map((row) => [prettyChannel(row.channel), Number(row.cvr || 0), `${formatNumber(row.cvr)}%`]);
+  const trafficSessionRows = trafficChannelRows.slice(0, 8).map((row) => [prettyTrafficChannel(row), Number(row.sessions || 0), formatInteger(row.sessions)]);
+  const trafficCvrRows = trafficChannelRows.slice(0, 8).map((row) => [prettyTrafficChannel(row), Number(row.cvr || 0), `${formatNumber(row.cvr)}%`]);
   const topQueryRows = topQueries.slice(0, 8).map((row) => [escapeHtml(row.name), formatInteger(row.clicks), `${formatNumber(row.ctr)}%`, formatNumber(row.position)]);
   const topPageRows = topPages.slice(0, 8).map((row) => [escapeHtml(row.name), formatInteger(row.clicks), formatInteger(row.impressions), `${formatNumber(row.ctr)}%`]);
   const funnelMatrixRows = attributionComparison
     .slice(0, 10)
     .map((row) => [
-      escapeHtml(prettyChannel(row.channel)),
+      escapeHtml(prettyTrafficChannel(row)),
       formatInteger(row.sessions),
       formatInteger(row.add_to_carts),
       formatInteger(row.checkouts),
@@ -1607,6 +1619,25 @@ function prettyChannel(value) {
   return text
     .replace(/[_-]+/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function prettyTrafficChannel(row) {
+  const channel = String(row?.channel || row?.channel_primary || "").trim().toLowerCase();
+  const subchannel = String(row?.subchannel || row?.channel_secondary || "").trim().toLowerCase();
+
+  if (channel === "ads") {
+    if (/(paid search|search|shopping|display|cross-network|google|gads|performance max|pmax)/.test(subchannel)) {
+      return "Google Ads";
+    }
+    if (/(paid social|social|meta|facebook|instagram|messenger)/.test(subchannel)) {
+      return "Meta Ads";
+    }
+    return "Ads";
+  }
+
+  if (channel === "organic" && /search/.test(subchannel)) return "Organic Search";
+  if (channel === "sns" && /social/.test(subchannel)) return "Organic Social";
+  return prettyChannel(row?.channel || row?.channel_primary);
 }
 
 function maskEmail(value) {
@@ -4102,6 +4133,8 @@ function renderBehaviorDashboard(behavior, previousBehavior) {
   const topPaths = behavior.top_paths || [];
   const topSearchTerms = behavior.top_search_terms || [];
   const daily = behavior.daily || [];
+  const impact = behavior.impact || [];
+  const modules = behavior.modules || [];
 
   const funnelRows = [
     ["Landing", Number(funnel.landing_views || 0), 100],
@@ -4160,6 +4193,8 @@ function renderBehaviorDashboard(behavior, previousBehavior) {
         ? compactTableCard("Top 用户路径", ["路径", "Sessions"], pathRows)
         : personaEmptyState("当前时间范围内暂无可识别的用户路径")}
     </div>
+    ${renderBehaviorImpactSection(impact)}
+    ${renderModuleImpactSection(modules)}
     <div class="grid cols-2">
       ${pages.length
         ? tableCard("页面表现", ["页面", "PV", "加购", "购买", "加购率", "购买率"], pageRows)
@@ -4182,6 +4217,84 @@ function renderBehaviorDashboard(behavior, previousBehavior) {
       `,
     )}
   `;
+}
+
+function renderModuleImpactSection(modules) {
+  const rows = (modules || []).filter((row) => Number(row.exposed_sessions || 0) > 0);
+  const topModule = rows[0] || {};
+  const tableRows = rows.map((row) => [
+    `${escapeHtml(row.module_name || row.module_id || "-")}<div class="small-label">${escapeHtml(row.module_type || "module")} · ${escapeHtml(row.module_position || "unknown")}${row.module_variant ? ` · ${escapeHtml(row.module_variant)}` : ""}</div>`,
+    formatInteger(row.exposed_sessions || 0),
+    `${formatNumber(row.interaction_rate || 0)}%`,
+    `${formatNumber(row.conversion_rate || 0)}%`,
+    `${formatNumber(row.baseline_conversion_rate || 0)}%`,
+    behaviorImpactDelta(row.uplift_pp || 0),
+    formatCurrency(row.revenue_per_session || 0),
+  ]);
+
+  return section(
+    "模块转化影响分析",
+    "按模块曝光/点击/展开对比未触达该模块的 Session，判断页面组件是否推动加购、结账和购买。",
+    `${pill("Module")} ${pill("Session Cohort")}`,
+    rows.length
+      ? `
+        <div class="grid cols-4">
+          ${behaviorImpactMetric("表现最好模块", topModule.module_name || topModule.module_id || "-", `${escapeHtml(topModule.module_type || "module")} · ${escapeHtml(topModule.module_position || "unknown")}`)}
+          ${behaviorImpactMetric("模块购买率", `${formatNumber(topModule.conversion_rate || 0)}%`, `曝光 Sessions ${formatInteger(topModule.exposed_sessions || 0)}`)}
+          ${behaviorImpactMetric("转化率差值", behaviorImpactDelta(topModule.uplift_pp || 0), `未触达购买率 ${formatNumber(topModule.baseline_conversion_rate || 0)}%`)}
+          ${behaviorImpactMetric("模块后 RPS", formatCurrency(topModule.revenue_per_session || 0), "Revenue / Session")}
+        </div>
+        ${tableCard("模块效果排行", ["模块", "曝光 Sessions", "互动率", "购买率", "未触达购买率", "提升", "RPS"], tableRows)}
+      `
+      : personaEmptyState("当前时间范围内暂无模块级埋点数据。先上报 module_view / module_click / module_expand 后，这里会展示模块对转化率的影响。"),
+  );
+}
+
+function renderBehaviorImpactSection(impact) {
+  const rows = (impact || []).filter((row) => Number(row.sessions || 0) > 0 || Number(row.baseline_sessions || 0) > 0);
+  const review = rows.find((row) => row.event_name === "review_opened") || rows[0] || {};
+  const tableRows = rows.map((row) => [
+    escapeHtml(row.label || row.event_name || "-"),
+    formatInteger(row.sessions || 0),
+    `${formatNumber(row.conversion_rate || 0)}%`,
+    `${formatNumber(row.baseline_conversion_rate || 0)}%`,
+    behaviorImpactDelta(row.uplift_pp || 0),
+    formatCurrency(row.revenue_per_session || 0),
+    formatInteger(row.converted_sessions || 0),
+  ]);
+
+  return section(
+    "行为影响分析",
+    "按 Session 对比触发某个站内行为与未触发该行为的人群，判断它对购买转化的影响。",
+    `${pill("Behavior")} ${pill("Conversion Impact")}`,
+    rows.length
+      ? `
+        <div class="grid cols-4">
+          ${behaviorImpactMetric(`${review.label || "重点行为"}转化率`, `${formatNumber(review.conversion_rate || 0)}%`, `触发 Sessions ${formatInteger(review.sessions || 0)}`)}
+          ${behaviorImpactMetric("未触发转化率", `${formatNumber(review.baseline_conversion_rate || 0)}%`, `未触发 Sessions ${formatInteger(review.baseline_sessions || 0)}`)}
+          ${behaviorImpactMetric("转化率差值", behaviorImpactDelta(review.uplift_pp || 0), `相对提升 ${formatNumber(review.relative_uplift || 0)}%`)}
+          ${behaviorImpactMetric("触发后 RPS", formatCurrency(review.revenue_per_session || 0), "Revenue / Session")}
+        </div>
+        ${tableCard("行为对转化率影响", ["行为", "触发 Sessions", "触发转化率", "未触发转化率", "提升", "RPS", "转化 Sessions"], tableRows)}
+      `
+      : personaEmptyState("当前时间范围内暂无足够的行为影响数据"),
+  );
+}
+
+function behaviorImpactMetric(label, value, subtitle) {
+  return `
+    <div class="card pad">
+      <div class="metric-label">${escapeHtml(label)}</div>
+      <div class="metric-value">${value}</div>
+      ${subtitle ? `<div class="small-label">${escapeHtml(subtitle)}</div>` : ""}
+    </div>
+  `;
+}
+
+function behaviorImpactDelta(value) {
+  const numeric = Number(value || 0);
+  const down = numeric < 0;
+  return `<span class="delta ${down ? "down" : ""}">${down ? "↘" : "↗"} ${numeric >= 0 ? "+" : ""}${formatNumber(numeric)} pp</span>`;
 }
 
 function renderBehaviorInsights(summary, funnel, pages, channels) {
@@ -4242,6 +4355,8 @@ function buildSeriesMap(data) {
   const ga4 = data.ga4_daily || [];
   const ads = data.ad_daily || [];
   const customer = data.customer_daily || [];
+  const trafficAttribution = data.traffic_attribution?.daily || [];
+  const attribution = data.attribution?.daily || [];
 
   return {
     gmv: sales.map((row) => ({ label: row.day, value: row.gmv })),
@@ -4275,6 +4390,12 @@ function buildSeriesMap(data) {
       label: row.day,
       value: row.new_customer_orders ? (ads.find((ad) => ad.day === row.day)?.spend || 0) / row.new_customer_orders : 0,
     })),
+    traffic_sessions: trafficAttribution.map((row) => ({ label: row.day, value: row.sessions_total })),
+    traffic_users: trafficAttribution.map((row) => ({ label: row.day, value: row.users_total })),
+    traffic_cvr: trafficAttribution.map((row) => ({ label: row.day, value: row.cvr })),
+    attribution_orders: attribution.map((row) => ({ label: row.day, value: row.orders_total })),
+    attribution_revenue: attribution.map((row) => ({ label: row.day, value: row.revenue_total })),
+    attribution_ready_orders: attribution.map((row) => ({ label: row.day, value: row.ready_orders })),
   };
 }
 

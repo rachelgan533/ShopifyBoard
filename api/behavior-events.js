@@ -59,6 +59,11 @@ const SUPPORTED_BEHAVIOR_EVENTS = new Set([
   "shipping_info_opened",
   "coupon_attempted",
   "wishlist_added",
+  "module_view",
+  "module_click",
+  "module_expand",
+  "module_submit",
+  "module_dismiss",
 ]);
 
 function assertEnv() {
@@ -199,6 +204,13 @@ function sanitizeProperties(properties, input) {
     "discount_codes",
     "element_name",
     "section_name",
+    "module_id",
+    "module_type",
+    "module_name",
+    "module_position",
+    "module_variant",
+    "experiment_id",
+    "variant_name",
   ];
 
   allowedPassThrough.forEach((key) => {

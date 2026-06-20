@@ -39,11 +39,11 @@ module.exports = async function handler(req, res) {
       supabaseFetch("/rest/v1/coupon_codes?select=code,category,owner,status&limit=10000"),
       supabaseFetch("/rest/v1/customers?select=id,email,first_name,last_name,last_order_at&limit=20000"),
       safeSupabaseFetch(
-        `/rest/v1/user_behavior_events?select=event_time,event_name,session_id,user_pseudo_id,customer_id,page_url,page_type,channel_primary,product_id,search_term&event_time=gte.${encodeURIComponent(range.startIso)}&event_time=lte.${encodeURIComponent(range.endIso)}&limit=50000`,
+        `/rest/v1/user_behavior_events?select=event_time,event_name,session_id,user_pseudo_id,customer_id,page_url,page_type,channel_primary,product_id,search_term,value,currency,properties&event_time=gte.${encodeURIComponent(range.startIso)}&event_time=lte.${encodeURIComponent(range.endIso)}&limit=50000`,
         [],
       ),
       safeSupabaseFetch(
-        `/rest/v1/user_behavior_events?select=event_time,event_name,session_id,user_pseudo_id,customer_id,page_url,page_type,channel_primary,product_id,search_term&event_time=gte.${encodeURIComponent(previousRange.startIso)}&event_time=lte.${encodeURIComponent(previousRange.endIso)}&limit=50000`,
+        `/rest/v1/user_behavior_events?select=event_time,event_name,session_id,user_pseudo_id,customer_id,page_url,page_type,channel_primary,product_id,search_term,value,currency,properties&event_time=gte.${encodeURIComponent(previousRange.startIso)}&event_time=lte.${encodeURIComponent(previousRange.endIso)}&limit=50000`,
         [],
       ),
       supabaseFetch(
@@ -336,6 +336,7 @@ function buildBehaviorData(rows) {
     const sessionId = String(row.session_id || "").trim() || `anon:${row.user_pseudo_id || row.customer_id || row.day}`;
     const channel = String(row.channel_primary || "").trim() || "unknown";
     const pageKey = `${row.page_url || "(unknown)"}::${row.page_type || "other"}`;
+    const properties = normalizeJsonObject(row.properties);
 
     eventCounts.set(eventName, (eventCounts.get(eventName) || 0) + 1);
 
@@ -358,6 +359,9 @@ function buildBehaviorData(rows) {
       page_url: row.page_url || "",
       product_id: row.product_id || "",
       search_term: row.search_term || "",
+      value: number(row.value),
+      currency: row.currency || "USD",
+      properties,
       event_time: row.event_time || "",
     });
     if (row.page_url) session.pages.add(row.page_url);
@@ -469,6 +473,8 @@ function buildBehaviorData(rows) {
     .map(([term, count]) => ({ term, searches: count }))
     .sort((a, b) => b.searches - a.searches)
     .slice(0, 10);
+  const impact = buildBehaviorImpact(sessions);
+  const modules = buildModuleImpact(sessions);
 
   return {
     summary: {
@@ -497,7 +503,196 @@ function buildBehaviorData(rows) {
     channels,
     top_paths: topPaths,
     top_search_terms: topSearchTerms,
+    impact,
+    modules,
     daily: Array.from(dailyMap.values()).sort((a, b) => a.day.localeCompare(b.day)),
+  };
+}
+
+function buildModuleImpact(sessions) {
+  const sessionFacts = sessions.map((session) => {
+    const events = session.events || [];
+    const eventNames = new Set(events.map((event) => event.event_name).filter(Boolean));
+    const converted = eventNames.has("purchase");
+    const revenue = events
+      .filter((event) => event.event_name === "purchase")
+      .reduce((sum, event) => sum + number(event.value), 0);
+    const modules = new Map();
+
+    events.forEach((event) => {
+      const moduleMeta = readEventModule(event);
+      if (!moduleMeta.id) return;
+      const current = modules.get(moduleMeta.id) || {
+        ...moduleMeta,
+        exposed: false,
+        interacted: false,
+        submitted: false,
+        events: 0,
+      };
+      current.exposed = current.exposed || isModuleExposureEvent(event.event_name);
+      current.interacted = current.interacted || isModuleInteractionEvent(event.event_name);
+      current.submitted = current.submitted || event.event_name === "module_submit";
+      current.events += 1;
+      modules.set(moduleMeta.id, current);
+    });
+
+    return { modules, converted, revenue };
+  });
+
+  const moduleMap = new Map();
+  sessionFacts.forEach((session) => {
+    session.modules.forEach((module) => {
+      if (!moduleMap.has(module.id)) {
+        moduleMap.set(module.id, {
+          module_id: module.id,
+          module_name: module.name,
+          module_type: module.type,
+          module_position: module.position,
+          module_variant: module.variant,
+          exposed_sessions: 0,
+          interacted_sessions: 0,
+          submitted_sessions: 0,
+          converted_sessions: 0,
+          revenue: 0,
+        });
+      }
+      const row = moduleMap.get(module.id);
+      row.exposed_sessions += 1;
+      if (module.interacted) row.interacted_sessions += 1;
+      if (module.submitted) row.submitted_sessions += 1;
+      if (session.converted) row.converted_sessions += 1;
+      row.revenue += number(session.revenue);
+    });
+  });
+
+  return Array.from(moduleMap.values())
+    .map((row) => {
+      const unexposed = sessionFacts.filter((session) => !session.modules.has(row.module_id));
+      const baseline = summarizeBehaviorImpactBucket(unexposed);
+      const conversionRate = round(row.exposed_sessions ? (row.converted_sessions / row.exposed_sessions) * 100 : 0);
+      const revenue = round(row.revenue);
+      return {
+        ...row,
+        revenue,
+        interaction_rate: round(row.exposed_sessions ? (row.interacted_sessions / row.exposed_sessions) * 100 : 0),
+        conversion_rate: conversionRate,
+        revenue_per_session: round(row.exposed_sessions ? revenue / row.exposed_sessions : 0),
+        baseline_sessions: baseline.sessions,
+        baseline_conversion_rate: baseline.conversion_rate,
+        baseline_revenue_per_session: baseline.revenue_per_session,
+        uplift_pp: round(conversionRate - baseline.conversion_rate),
+        relative_uplift: round(
+          baseline.conversion_rate
+            ? ((conversionRate - baseline.conversion_rate) / baseline.conversion_rate) * 100
+            : conversionRate > 0
+              ? 100
+              : 0,
+        ),
+      };
+    })
+    .sort((a, b) => Math.abs(b.uplift_pp) - Math.abs(a.uplift_pp) || b.exposed_sessions - a.exposed_sessions)
+    .slice(0, 16);
+}
+
+function readEventModule(event) {
+  const properties = normalizeJsonObject(event.properties);
+  const moduleId = trimText(properties.module_id || properties.element_name || properties.section_name);
+  if (!moduleId && !isModuleEvent(event.event_name)) return {};
+  const fallbackId = moduleId || `${event.page_type || "page"}:${event.event_name}`;
+  return {
+    id: fallbackId,
+    name: trimText(properties.module_name || properties.section_name || properties.element_name || fallbackId),
+    type: trimText(properties.module_type || inferModuleType(event.event_name, fallbackId)),
+    position: trimText(properties.module_position || event.page_type || "unknown"),
+    variant: trimText(properties.module_variant || properties.variant_name || properties.experiment_id || ""),
+  };
+}
+
+function isModuleEvent(eventName) {
+  return /^module_/.test(String(eventName || ""));
+}
+
+function isModuleExposureEvent(eventName) {
+  return ["module_view", "module_click", "module_expand", "module_submit"].includes(String(eventName || ""));
+}
+
+function isModuleInteractionEvent(eventName) {
+  return ["module_click", "module_expand", "module_submit"].includes(String(eventName || ""));
+}
+
+function inferModuleType(eventName, moduleId) {
+  const text = `${eventName || ""} ${moduleId || ""}`.toLowerCase();
+  if (text.includes("review")) return "review";
+  if (text.includes("faq")) return "faq";
+  if (text.includes("shipping")) return "shipping";
+  if (text.includes("search")) return "search";
+  if (text.includes("coupon")) return "coupon";
+  if (text.includes("bundle") || text.includes("upsell")) return "upsell";
+  return "module";
+}
+
+function buildBehaviorImpact(sessions) {
+  const definitions = [
+    { event_name: "review_opened", label: "看评论" },
+    { event_name: "site_search", label: "站内搜索" },
+    { event_name: "shipping_info_opened", label: "查看配送信息" },
+    { event_name: "faq_opened", label: "查看 FAQ" },
+    { event_name: "wishlist_added", label: "加入愿望单" },
+    { event_name: "coupon_attempted", label: "尝试优惠码" },
+  ];
+
+  const sessionFacts = sessions.map((session) => {
+    const events = session.events || [];
+    const eventNames = new Set(events.map((event) => event.event_name).filter(Boolean));
+    const converted = eventNames.has("purchase");
+    const revenue = events
+      .filter((event) => event.event_name === "purchase")
+      .reduce((sum, event) => sum + number(event.value), 0);
+    return { eventNames, converted, revenue };
+  });
+
+  return definitions
+    .map((definition) => {
+      const exposed = sessionFacts.filter((session) => session.eventNames.has(definition.event_name));
+      const unexposed = sessionFacts.filter((session) => !session.eventNames.has(definition.event_name));
+      const exposedMetrics = summarizeBehaviorImpactBucket(exposed);
+      const baselineMetrics = summarizeBehaviorImpactBucket(unexposed);
+      return {
+        event_name: definition.event_name,
+        label: definition.label,
+        sessions: exposedMetrics.sessions,
+        converted_sessions: exposedMetrics.converted_sessions,
+        conversion_rate: exposedMetrics.conversion_rate,
+        revenue: exposedMetrics.revenue,
+        revenue_per_session: exposedMetrics.revenue_per_session,
+        baseline_sessions: baselineMetrics.sessions,
+        baseline_converted_sessions: baselineMetrics.converted_sessions,
+        baseline_conversion_rate: baselineMetrics.conversion_rate,
+        baseline_revenue_per_session: baselineMetrics.revenue_per_session,
+        uplift_pp: round(exposedMetrics.conversion_rate - baselineMetrics.conversion_rate),
+        relative_uplift: round(
+          baselineMetrics.conversion_rate
+            ? ((exposedMetrics.conversion_rate - baselineMetrics.conversion_rate) / baselineMetrics.conversion_rate) * 100
+            : exposedMetrics.conversion_rate > 0
+              ? 100
+              : 0,
+        ),
+      };
+    })
+    .filter((row) => row.sessions > 0 || row.baseline_sessions > 0)
+    .sort((a, b) => Math.abs(b.uplift_pp) - Math.abs(a.uplift_pp));
+}
+
+function summarizeBehaviorImpactBucket(sessions) {
+  const sessionCount = sessions.length;
+  const convertedSessions = sessions.filter((session) => session.converted).length;
+  const revenue = sessions.reduce((sum, session) => sum + number(session.revenue), 0);
+  return {
+    sessions: sessionCount,
+    converted_sessions: convertedSessions,
+    conversion_rate: round(sessionCount ? (convertedSessions / sessionCount) * 100 : 0),
+    revenue: round(revenue),
+    revenue_per_session: round(sessionCount ? revenue / sessionCount : 0),
   };
 }
 
@@ -1169,6 +1364,13 @@ function buildTrafficAttributionData(rows) {
     if (!daily.has(day)) {
       daily.set(day, {
         day,
+        sessions_total: 0,
+        users_total: 0,
+        new_users_total: 0,
+        engaged_sessions_total: 0,
+        add_to_carts_total: 0,
+        checkouts_total: 0,
+        purchases_total: 0,
         direct: 0,
         organic: 0,
         ads: 0,
@@ -1183,6 +1385,13 @@ function buildTrafficAttributionData(rows) {
       });
     }
     const dayBucket = daily.get(day);
+    dayBucket.sessions_total += number(row.sessions);
+    dayBucket.users_total += number(row.users);
+    dayBucket.new_users_total += number(row.new_users);
+    dayBucket.engaged_sessions_total += number(row.engaged_sessions);
+    dayBucket.add_to_carts_total += number(row.add_to_carts);
+    dayBucket.checkouts_total += number(row.checkouts);
+    dayBucket.purchases_total += number(row.purchases);
     if (Object.prototype.hasOwnProperty.call(dayBucket, channel)) dayBucket[channel] += number(row.sessions);
     else dayBucket.other += number(row.sessions);
   });
@@ -1220,7 +1429,14 @@ function buildTrafficAttributionData(rows) {
       checkout_rate: round(summary.sessions ? (summary.checkouts / summary.sessions) * 100 : 0),
     },
     channels,
-    daily: Array.from(daily.values()).sort((a, b) => a.day.localeCompare(b.day)),
+    daily: Array.from(daily.values())
+      .map((row) => ({
+        ...row,
+        cvr: round(row.sessions_total ? (row.purchases_total / row.sessions_total) * 100 : 0),
+        add_to_cart_rate: round(row.sessions_total ? (row.add_to_carts_total / row.sessions_total) * 100 : 0),
+        checkout_rate: round(row.sessions_total ? (row.checkouts_total / row.sessions_total) * 100 : 0),
+      }))
+      .sort((a, b) => a.day.localeCompare(b.day)),
   };
 }
 
@@ -1447,6 +1663,9 @@ function buildAttributionData(orderRows, couponRows) {
     if (!daily.has(day)) {
       daily.set(day, {
         day,
+        orders_total: 0,
+        revenue_total: 0,
+        ready_orders: 0,
         direct: 0,
         organic: 0,
         ads: 0,
@@ -1460,6 +1679,9 @@ function buildAttributionData(orderRows, couponRows) {
       });
     }
     const dayBucket = daily.get(day);
+    dayBucket.orders_total += 1;
+    dayBucket.revenue_total += revenue;
+    if (snapshot.ready) dayBucket.ready_orders += 1;
     if (Object.prototype.hasOwnProperty.call(dayBucket, snapshot.channel)) {
       dayBucket[snapshot.channel] += 1;
     } else {
@@ -1511,7 +1733,12 @@ function buildAttributionData(orderRows, couponRows) {
     },
     quality,
     channels,
-    daily: Array.from(daily.values()).sort((a, b) => a.day.localeCompare(b.day)),
+    daily: Array.from(daily.values())
+      .map((row) => ({
+        ...row,
+        revenue_total: round(row.revenue_total),
+      }))
+      .sort((a, b) => a.day.localeCompare(b.day)),
     top_kol: finalizeAttributionOwners(kolBuckets, totalOrders),
     top_affiliate: finalizeAttributionOwners(affiliateBuckets, totalOrders),
   };
@@ -1919,6 +2146,25 @@ async function safeSupabaseFetch(path, fallback = [], options = {}) {
 
 function trimSlash(value) {
   return String(value || "").replace(/\/$/, "");
+}
+
+function trimText(value) {
+  const text = String(value || "").trim();
+  return text || "";
+}
+
+function normalizeJsonObject(value) {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
 }
 
 function number(value) {
