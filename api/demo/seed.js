@@ -66,8 +66,8 @@ function assertAuthorized(req) {
 }
 
 async function ensureDemoShop(inputDomain, inputName) {
-  const domain = String(inputDomain || "demo-canoly.myshopify.com").trim() || "demo-canoly.myshopify.com";
-  const name = String(inputName || "Canoly Demo Store").trim() || "Canoly Demo Store";
+  const domain = String(inputDomain || "demo-bohealthy.myshopify.com").trim() || "demo-bohealthy.myshopify.com";
+  const name = String(inputName || "boHealthy Demo Store").trim() || "boHealthy Demo Store";
 
   await supabaseFetch("/rest/v1/shops?on_conflict=shop_domain", {
     method: "POST",
@@ -149,14 +149,14 @@ function buildDemoPayload(shop, days) {
   ];
 
   const products = [
-    { id: "demo_product_01", title: "C16 3-in-1 Multi-Function Juicer", sku: "C16-3IN1", price: 189, vendor: "Canoly", product_type: "Juicer" },
-    { id: "demo_product_02", title: "Cold Press Blender Pro", sku: "CPB-PRO", price: 159, vendor: "Canoly", product_type: "Blender" },
-    { id: "demo_product_03", title: "Portable Juice Cup", sku: "PORT-CUP", price: 69, vendor: "Canoly", product_type: "Cup" },
-    { id: "demo_product_04", title: "Glass Bottle Set", sku: "GLASS-SET", price: 39, vendor: "Canoly", product_type: "Accessory" },
-    { id: "demo_product_05", title: "Filter Replacement Kit", sku: "FILTER-KIT", price: 29, vendor: "Canoly", product_type: "Accessory" },
-    { id: "demo_product_06", title: "Smoothie Maker Mini", sku: "SMOOTH-MINI", price: 99, vendor: "Canoly", product_type: "Blender" },
-    { id: "demo_product_07", title: "Premium Fruit Prep Tool", sku: "PREP-TOOL", price: 24, vendor: "Canoly", product_type: "Accessory" },
-    { id: "demo_product_08", title: "Family Juicer Bundle", sku: "BUNDLE-FAM", price: 249, vendor: "Canoly", product_type: "Bundle" },
+    { id: "demo_product_01", title: "C16 3-in-1 Multi-Function Juicer", sku: "C16-3IN1", price: 189, vendor: "boHealthy", product_type: "Juicer" },
+    { id: "demo_product_02", title: "Cold Press Blender Pro", sku: "CPB-PRO", price: 159, vendor: "boHealthy", product_type: "Blender" },
+    { id: "demo_product_03", title: "Portable Juice Cup", sku: "PORT-CUP", price: 69, vendor: "boHealthy", product_type: "Cup" },
+    { id: "demo_product_04", title: "Glass Bottle Set", sku: "GLASS-SET", price: 39, vendor: "boHealthy", product_type: "Accessory" },
+    { id: "demo_product_05", title: "Filter Replacement Kit", sku: "FILTER-KIT", price: 29, vendor: "boHealthy", product_type: "Accessory" },
+    { id: "demo_product_06", title: "Smoothie Maker Mini", sku: "SMOOTH-MINI", price: 99, vendor: "boHealthy", product_type: "Blender" },
+    { id: "demo_product_07", title: "Premium Fruit Prep Tool", sku: "PREP-TOOL", price: 24, vendor: "boHealthy", product_type: "Accessory" },
+    { id: "demo_product_08", title: "Family Juicer Bundle", sku: "BUNDLE-FAM", price: 249, vendor: "boHealthy", product_type: "Bundle" },
   ];
 
   const coupons = [
@@ -257,7 +257,7 @@ function buildDemoPayload(shop, days) {
         customer_province: customer.province,
         customer_city: customer.city,
         source_name: channel.name,
-        landing_site: `https://demo-canoly.myshopify.com/products/${slugify(firstProduct.title)}`,
+        landing_site: `https://demo-bohealthy.myshopify.com/products/${slugify(firstProduct.title)}`,
         referring_site: channel.name === "Paid Social" ? "instagram.com" : channel.name === "Referral" ? "youtube.com" : "",
         discount_codes: coupon ? [coupon.code] : [],
         raw: { demo_seed: true, coupon_category: coupon?.category || null },
@@ -600,7 +600,7 @@ function buildSearchConsoleDemo(shopId, today, days) {
 
     rows.push({
       shop_id: shopId,
-      site_url: "sc-domain:demo-canoly.com",
+      site_url: "sc-domain:demo-bohealthy.com",
       day,
       dimension_type: "summary",
       dimension_value: "all",
@@ -616,7 +616,7 @@ function buildSearchConsoleDemo(shopId, today, days) {
       const queryImpressions = Math.max(queryClicks * 6, Math.round(impressions * (0.2 - queryIndex * 0.02 + pseudo(index + queryIndex + 353) * 0.02)));
       rows.push({
         shop_id: shopId,
-        site_url: "sc-domain:demo-canoly.com",
+        site_url: "sc-domain:demo-bohealthy.com",
         day,
         dimension_type: "query",
         dimension_value: query,
@@ -633,7 +633,7 @@ function buildSearchConsoleDemo(shopId, today, days) {
       const pageImpressions = Math.max(pageClicks * 7, Math.round(impressions * (0.25 - pageIndex * 0.03 + pseudo(index + pageIndex + 379) * 0.02)));
       rows.push({
         shop_id: shopId,
-        site_url: "sc-domain:demo-canoly.com",
+        site_url: "sc-domain:demo-bohealthy.com",
         day,
         dimension_type: "page",
         dimension_value: page,
@@ -650,7 +650,7 @@ function buildSearchConsoleDemo(shopId, today, days) {
       const countryImpressions = Math.max(countryClicks * 8, Math.round(impressions * (0.33 - countryIndex * 0.045 + pseudo(index + countryIndex + 401) * 0.02)));
       rows.push({
         shop_id: shopId,
-        site_url: "sc-domain:demo-canoly.com",
+        site_url: "sc-domain:demo-bohealthy.com",
         day,
         dimension_type: "country",
         dimension_value: country,
@@ -667,7 +667,7 @@ function buildSearchConsoleDemo(shopId, today, days) {
       const deviceImpressions = Math.max(deviceClicks * 9, Math.round(impressions * (device === "mobile" ? 0.56 : device === "desktop" ? 0.35 : 0.09)));
       rows.push({
         shop_id: shopId,
-        site_url: "sc-domain:demo-canoly.com",
+        site_url: "sc-domain:demo-bohealthy.com",
         day,
         dimension_type: "device",
         dimension_value: device,
@@ -970,7 +970,7 @@ async function upsertDemoData(shop, payload) {
     google_auth_mode: "Demo Data",
   });
   await touchIntegration(shop.id, "search_console", "connected", {
-    site_url: "sc-domain:demo-canoly.com",
+    site_url: "sc-domain:demo-bohealthy.com",
     google_auth_mode: "Demo Data",
   });
 

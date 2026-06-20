@@ -108,7 +108,7 @@ const couponRows = [
 
 const app = document.querySelector("#app");
 const state = {
-  storeName: "Canoly",
+  storeName: "boHealthy",
   range: "近 30 天",
   customRange: {
     start: "",
@@ -3044,7 +3044,7 @@ async function seedDemoData() {
       body: JSON.stringify({
         action: "seed",
         days: 30,
-        shop_name: state.storeName || "Canoly Demo Store",
+        shop_name: state.storeName || "boHealthy Demo Store",
       }),
     });
     const data = await response.json();
@@ -3226,7 +3226,7 @@ function dedupeIntegrationsBySource(rows) {
 }
 
 function updateStoreIdentity(name) {
-  const safeName = String(name || "").trim() || "Canoly";
+  const safeName = String(name || "").trim() || "boHealthy";
   state.storeName = safeName;
   const brand = document.querySelector("[data-brand-title]");
   const chip = document.querySelector("[data-store-name]");
