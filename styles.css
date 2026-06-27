@@ -381,9 +381,11 @@ button {
   gap: 6px;
   border-radius: 999px;
   white-space: nowrap;
+  max-width: 100%;
 }
 
 .pill {
+  min-width: 0;
   min-height: 24px;
   padding: 0 11px;
   color: #4d7fe8;
@@ -391,6 +393,8 @@ button {
   border: 1px solid #bfd5fb;
   font-size: 12px;
   font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pill::before {
@@ -445,7 +449,7 @@ button {
 }
 
 .metric-grid-auto {
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(232px, 1fr));
 }
 
 .card {
@@ -470,11 +474,31 @@ button {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.metric-head > :first-child {
+  flex: 1 1 120px;
+  min-width: 0;
 }
 
 .metric-side {
   display: grid;
   justify-items: end;
+  align-content: start;
+  flex: 0 1 112px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-align: right;
+}
+
+.metric-card .pill {
+  max-width: 100%;
+  padding: 0 9px;
+  font-size: 11px;
 }
 
 .metric-label {
@@ -488,12 +512,19 @@ button {
   font-size: 21px;
   letter-spacing: 0;
   color: #101820;
+  max-width: 100%;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
 }
 
 .delta {
   font-size: 12px;
   font-weight: 800;
   color: var(--green);
+  line-height: 1.25;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 .delta.down {
