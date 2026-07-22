@@ -191,7 +191,11 @@ async function syncShopifyOrders(mode = "sync") {
   const accessToken = await getShopifyAccessToken(shopDomain, config);
 
   const shop = await ensureShop(shopDomain, accessToken);
-  await assertShopifyScopes(shopDomain, accessToken, ["read_orders"]);
+  const syncState = await getSyncState(shop.id);
+  const updatedAfter = syncState?.last_synced_at || process.env.SHOPIFY_SYNC_START_DATE || daysAgoIso(30);
+  const requiredScopes = ["read_orders", "read_customers", "read_products"];
+  if (requiresAllOrdersAccess(updatedAfter)) requiredScopes.push("read_all_orders");
+  await assertShopifyScopes(shopDomain, accessToken, requiredScopes, { updatedAfter });
 
   if (mode === "test") {
     const now = new Date().toISOString();
@@ -208,9 +212,6 @@ async function syncShopifyOrders(mode = "sync") {
       tested_at: now,
     };
   }
-
-  const syncState = await getSyncState(shop.id);
-  const updatedAfter = syncState?.last_synced_at || process.env.SHOPIFY_SYNC_START_DATE || daysAgoIso(30);
 
   let cursor = null;
   let pages = 0;
@@ -387,7 +388,7 @@ async function ensureShop(shopDomain, accessToken) {
   return rows[0];
 }
 
-async function assertShopifyScopes(shopDomain, accessToken, requiredScopes) {
+async function assertShopifyScopes(shopDomain, accessToken, requiredScopes, context = {}) {
   const query = `
     query CurrentAppScopes {
       currentAppInstallation {
@@ -408,20 +409,28 @@ async function assertShopifyScopes(shopDomain, accessToken, requiredScopes) {
 
   const missing = requiredScopes.filter((scope) => !scopes.includes(scope));
   if (missing.length) {
+    const fix = [
+      "打开 Shopify Dev Dashboard",
+      "进入当前这个应用",
+      "打开 Configuration / Admin API integration",
+      "补齐缺少的 scopes",
+      "保存配置",
+      "回到店铺里重新安装或更新应用授权",
+      "重新部署 Vercel 后再试一次同步",
+    ];
+    if (missing.includes("read_all_orders")) {
+      fix.unshift(
+        `当前同步起点是 ${context.updatedAfter || "较早日期"}，已经早于最近 60 天`,
+        "先在 Shopify Partner Dashboard -> Apps -> API access 申请 read_all_orders 权限",
+      );
+    }
     const error = new Error("Shopify app is missing required Admin API scopes");
     error.statusCode = 403;
     error.details = {
       missing_scopes: missing,
       current_scopes: scopes,
-      fix: [
-        "Open Shopify Dev Dashboard",
-        "Open this app",
-        "Go to Configuration / Admin API integration",
-        "Add the missing scopes",
-        "Save changes",
-        "Reinstall or update the app on the store",
-        "Redeploy Vercel, then run sync again",
-      ],
+      updated_after: context.updatedAfter || null,
+      fix,
     };
     throw error;
   }
@@ -569,10 +578,10 @@ async function shopifyGraphql(shopDomain, accessToken, query, variables) {
       error.details = {
         shopify_errors: body.errors,
         likely_fix: [
-          "Add read_orders in Shopify Dev Dashboard -> Configuration -> Admin API integration",
-          "Also keep read_customers and read_products for customer/product fields",
-          "Save scopes and reinstall/update the app on the store",
-          "Redeploy Vercel so the sync function uses the latest code/env",
+          "去 Shopify Dev Dashboard -> Configuration -> Admin API integration，确认已开启 read_orders",
+          "如果要读取客户和商品字段，还要保留 read_customers 与 read_products",
+          "保存 scope 后，回到店铺里重新安装或更新这个应用授权",
+          "重新部署 Vercel，确保同步函数拿到最新代码和环境变量",
         ],
       };
     }
@@ -649,6 +658,13 @@ function daysAgoIso(days) {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() - days);
   return date.toISOString();
+}
+
+function requiresAllOrdersAccess(updatedAfter) {
+  const timestamp = new Date(updatedAfter).getTime();
+  if (!Number.isFinite(timestamp)) return false;
+  const sixtyDaysAgo = new Date(daysAgoIso(60)).getTime();
+  return timestamp < sixtyDaysAgo;
 }
 
 function newestIso(current, values) {

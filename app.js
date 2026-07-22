@@ -2940,8 +2940,8 @@ async function runShopifySync(mode = "sync") {
   try {
     const suffix = mode === "test" ? "&mode=test" : "";
     const response = await fetch(`/api/sync/shopify-orders?secret=${encodeURIComponent(state.integrationSecret)}${suffix}`);
-    const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data.error || "同步失败");
+    const data = await readApiJson(response, "同步失败");
+    if (!response.ok || !data.ok) throw new Error(describeApiError(data, "同步失败"));
     await loadIntegrationConfigs();
     if (mode === "test") {
       showToast("Shopify 连接测试通过。");
@@ -3122,6 +3122,23 @@ function describeApiError(data, fallback) {
 
   if (typeof details === "string") return `${base}：${details}`;
   if (details.message) return `${base}：${details.message}`;
+  if (Array.isArray(details.shopify_errors)) {
+    const messages = details.shopify_errors
+      .map((item) => item?.message || item?.extensions?.code)
+      .filter(Boolean);
+    if (messages.length && Array.isArray(details.likely_fix)) {
+      return `${base}：${messages.join(" / ")}；${details.likely_fix.join("；")}`;
+    }
+    if (messages.length) return `${base}：${messages.join(" / ")}`;
+  }
+  if (Array.isArray(details.missing_scopes)) {
+    const missing = details.missing_scopes.join(", ");
+    if (Array.isArray(details.fix)) return `${base}：缺少权限 ${missing}；${details.fix.join("；")}`;
+    if (details.fix) return `${base}：缺少权限 ${missing}；${details.fix}`;
+    return `${base}：缺少权限 ${missing}`;
+  }
+  if (Array.isArray(details.likely_fix)) return `${base}：${details.likely_fix.join("；")}`;
+  if (details.likely_fix) return `${base}：${details.likely_fix}`;
   if (Array.isArray(details.fix)) return `${base}：${details.fix.join("；")}`;
   if (details.fix) return `${base}：${details.fix}`;
   if (details.table) {
