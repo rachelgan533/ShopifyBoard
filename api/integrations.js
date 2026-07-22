@@ -229,16 +229,35 @@ async function readJson(req) {
 }
 
 async function supabaseFetch(path, options = {}) {
-  const response = await fetch(`${trimSlash(process.env.SUPABASE_URL)}${path}`, {
-    method: options.method || "GET",
-    headers: {
-      apikey: process.env.SUPABASE_SECRET_KEY,
-      authorization: `Bearer ${process.env.SUPABASE_SECRET_KEY}`,
-      "content-type": "application/json",
-      ...(options.headers || {}),
-    },
-    body: options.body,
-  });
+  const baseUrl = trimSlash(process.env.SUPABASE_URL);
+  const targetUrl = `${baseUrl}${path}`;
+  let response;
+
+  try {
+    response = await fetch(targetUrl, {
+      method: options.method || "GET",
+      headers: {
+        apikey: process.env.SUPABASE_SECRET_KEY,
+        authorization: `Bearer ${process.env.SUPABASE_SECRET_KEY}`,
+        "content-type": "application/json",
+        ...(options.headers || {}),
+      },
+      body: options.body,
+    });
+  } catch (cause) {
+    const error = new Error("Failed to reach Supabase");
+    error.statusCode = 502;
+    error.details = {
+      url: targetUrl,
+      cause: cause?.message || String(cause || ""),
+      fix: [
+        "Confirm SUPABASE_URL is copied exactly from Supabase Settings -> API",
+        "Remove any leading/trailing spaces or quotes in the Vercel environment variable",
+        "Check whether the Supabase project is paused, deleted, or otherwise unreachable",
+      ],
+    };
+    throw error;
+  }
 
   const text = await response.text();
   const body = text ? JSON.parse(text) : null;
@@ -254,5 +273,5 @@ async function supabaseFetch(path, options = {}) {
 }
 
 function trimSlash(value) {
-  return String(value || "").replace(/\/$/, "");
+  return String(value || "").trim().replace(/\/$/, "");
 }
