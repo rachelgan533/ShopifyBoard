@@ -43,9 +43,6 @@ const SHOPIFY_ORDER_QUERY = `
                 content
                 term
               }
-              marketingEvent {
-                id
-              }
             }
           }
           totalPriceSet {
