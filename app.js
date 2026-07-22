@@ -2176,7 +2176,7 @@ function integrationPage() {
       subtitle: "Shopify · Client Credentials",
       status: "待保存",
       fields: [
-        ["shop_domain", "Store Domain · 店铺域名", "bohealthy.myshopify.com"],
+        ["shop_domain", "Store Domain · 店铺域名", "booziesdesign.myshopify.com"],
         ["shop_name", "Shop Name · 店铺名称", state.storeName],
         ["client_id", "Client ID · Shopify App Client ID", ""],
         ["client_secret", "Client Secret · 仅服务端保存", ""],
@@ -2693,7 +2693,7 @@ async function loadGoals() {
   try {
     const response = await fetch("/api/goals");
     if (!response.ok) return;
-    const data = await response.json();
+    const data = await readApiJson(response, "加载目标失败");
     if (!data.ok) return;
     state.goalsData = data;
     if (!state.goalForm || !state.goalForm.id) {
@@ -2763,8 +2763,8 @@ async function saveGoal() {
         status: form.is_active ? "active" : "draft",
       }),
     });
-    const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data.error || "保存失败");
+    const data = await readApiJson(response, "保存失败");
+    if (!response.ok || !data.ok) throw new Error(describeApiError(data, "保存失败"));
     showToast("目标已保存。");
     await loadGoals();
     invalidateDashboardData();
@@ -2792,7 +2792,7 @@ async function setGoalActive(goalId, isActive) {
         status: isActive ? "active" : "inactive",
       }),
     });
-    const data = await response.json();
+    const data = await readApiJson(response, "加载集成配置失败");
     if (!response.ok || !data.ok) throw new Error(data.error || "更新失败");
     showToast(isActive ? "已启用为活动目标。" : "已停用当前目标。");
     await loadGoals();
@@ -2860,8 +2860,8 @@ async function saveIntegration(button) {
         status: ["ga4", "google_ads", "search_console", "meta_ads"].includes(source) ? "configured" : "connected",
       }),
     });
-    const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data.error || "保存失败");
+    const data = await readApiJson(response, "保存失败");
+    if (!response.ok || !data.ok) throw new Error(describeApiError(data, "保存失败"));
     showToast(`${sourceLabel(source)} 配置已保存到 Supabase。`);
     loadIntegrationConfigs();
     return true;
@@ -2900,7 +2900,7 @@ async function disconnectSource(button) {
               : [],
       }),
     });
-    const data = await response.json();
+    const data = await readApiJson(response, "加载集成配置失败");
     if (!response.ok || !data.ok) throw new Error(data.error || "断开失败");
     showToast(`${sourceLabel(source)} 已断开。`);
     loadIntegrationConfigs();
@@ -3132,6 +3132,21 @@ function describeApiError(data, fallback) {
     return `${base}：${[details.code, details.hint, details.details].filter(Boolean).join(" / ")}`;
   }
   return base;
+}
+
+async function readApiJson(response, fallback = "请求失败") {
+  const text = await response.text();
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    const compact = text.replace(/\s+/g, " ").trim();
+    if (/<(?:!doctype|html|head|body)\b/i.test(compact)) {
+      throw new Error("当前页面像是静态预览，没有可用的 API runtime。请改用 Vercel 部署地址，或用支持 Serverless Functions 的方式运行项目。");
+    }
+    throw new Error(`${fallback}：接口返回了非 JSON 内容${compact ? `（${compact.slice(0, 120)}）` : ""}`);
+  }
 }
 
 async function loadIntegrationConfigs() {
