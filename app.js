@@ -2866,7 +2866,7 @@ async function saveIntegration(button) {
     loadIntegrationConfigs();
     return true;
   } catch (error) {
-    showToast(`保存失败：${error.message}`);
+    showToast(`保存失败：${describeFetchFailure(error, "/api/integrations")}`);
     return false;
   }
 }
@@ -3149,11 +3149,30 @@ async function readApiJson(response, fallback = "请求失败") {
   }
 }
 
+function describeFetchFailure(error, endpoint) {
+  const message = String(error?.message || "请求失败");
+  if (!/fetch failed|failed to fetch|networkerror/i.test(message)) return message;
+
+  const protocol = window.location?.protocol || "";
+  const host = window.location?.host || "";
+  const origin = window.location?.origin || host || "当前地址";
+
+  if (protocol === "file:") {
+    return `当前页面是本地文件预览（file://），无法请求 ${endpoint}。请改用 Vercel 部署地址。`;
+  }
+
+  if (/^(localhost|127\\.0\\.0\\.1)(:\\d+)?$/i.test(host)) {
+    return `当前页面运行在 ${origin}。如果你是用静态预览启动的页面，它没有 ${endpoint} 接口；请改用 Vercel 部署地址，或本地启动支持 API 的服务。`;
+  }
+
+  return `当前页面无法请求 ${endpoint}。请检查你打开的是否就是已部署的 Vercel 站点，并确认这个站点的 /api 路由可用。原始错误：${message}`;
+}
+
 async function loadIntegrationConfigs() {
   try {
     const response = await fetch("/api/integrations");
     if (!response.ok) return;
-    const data = await response.json();
+    const data = await readApiJson(response, "加载集成配置失败");
     if (!data.ok) return;
 
     const integrations = dedupeIntegrationsBySource(data.integrations || []);
