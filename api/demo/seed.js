@@ -104,11 +104,14 @@ async function clearDemoData(shopId) {
   const productIds = productRows.map((row) => row.id).filter(Boolean);
   const customerIds = customerRows.map((row) => row.id).filter(Boolean);
   const orderIds = orderRows.map((row) => row.id).filter(Boolean);
+  const legacyCustomerOrderIds = await safeSelectRelatedIds("orders", "customer_id", customerIds);
+  const allOrderIds = Array.from(new Set([...orderIds, ...legacyCustomerOrderIds]));
 
-  await deleteByIds("order_line_items", "order_id", orderIds);
+  await deleteByIds("order_line_items", "order_id", allOrderIds);
   await deleteByIds("order_line_items", "product_id", productIds);
-  await deleteByIds("refunds", "order_id", orderIds);
-  await deleteByIds("orders", "id", orderIds);
+  await deleteByIds("refunds", "order_id", allOrderIds);
+  await deleteByIds("orders", "id", allOrderIds);
+  await deleteByIds("orders", "customer_id", customerIds);
   await deleteByIds("customers", "id", customerIds);
   await deleteByIds("products", "id", productIds);
 
@@ -1226,6 +1229,31 @@ async function safeSelectIds(table, shopId) {
     if (isMissingTableError(error)) return [];
     throw error;
   }
+}
+
+async function safeSelectRelatedIds(table, column, ids) {
+  const uniqueIds = Array.from(new Set((ids || []).filter(Boolean)));
+  if (!uniqueIds.length) return [];
+
+  const found = [];
+  const chunkSize = 100;
+  for (let start = 0; start < uniqueIds.length; start += chunkSize) {
+    const chunk = uniqueIds.slice(start, start + chunkSize);
+    const encoded = chunk.map((id) => `"${String(id).replace(/"/g, '\\"')}"`).join(",");
+    try {
+      const rows = await supabaseFetch(
+        `/rest/v1/${table}?${column}=in.(${encodeURIComponent(encoded)})&select=id&limit=5000`,
+      );
+      for (const row of rows || []) {
+        if (row?.id) found.push(row.id);
+      }
+    } catch (error) {
+      if (isMissingTableError(error)) return [];
+      throw error;
+    }
+  }
+
+  return Array.from(new Set(found));
 }
 
 async function deleteByIds(table, column, ids) {

@@ -56,7 +56,7 @@ function assertSupabaseEnv() {
 function getGoogleOAuthConfig(req) {
   const clientId = String(process.env.GOOGLE_OAUTH_CLIENT_ID || "").trim();
   const clientSecret = String(process.env.GOOGLE_OAUTH_CLIENT_SECRET || "").trim();
-  const redirectUri = String(process.env.GOOGLE_OAUTH_REDIRECT_URI || "").trim() || `${getBaseUrl(req)}/api/oauth/google/callback`;
+  const redirectUri = resolveGoogleRedirectUri(req);
 
   if (!clientId || !clientSecret) {
     const error = new Error("Missing Google OAuth client configuration");
@@ -72,6 +72,32 @@ function getGoogleOAuthConfig(req) {
   }
 
   return { clientId, clientSecret, redirectUri };
+}
+
+function resolveGoogleRedirectUri(req) {
+  const currentRedirectUri = `${getBaseUrl(req)}/api/oauth/google/callback`;
+  const configuredRedirectUri = String(process.env.GOOGLE_OAUTH_REDIRECT_URI || "").trim();
+  if (!configuredRedirectUri) return currentRedirectUri;
+
+  try {
+    const configuredUrl = new URL(configuredRedirectUri);
+    const currentUrl = new URL(currentRedirectUri);
+
+    // If the configured callback points at an old Vercel deployment hostname,
+    // prefer the current request host so OAuth doesn't bounce into a deleted deployment.
+    if (
+      configuredUrl.host !== currentUrl.host &&
+      configuredUrl.hostname.endsWith(".vercel.app") &&
+      currentUrl.hostname.endsWith(".vercel.app") &&
+      configuredUrl.pathname === currentUrl.pathname
+    ) {
+      return currentRedirectUri;
+    }
+  } catch {
+    return currentRedirectUri;
+  }
+
+  return configuredRedirectUri;
 }
 
 function createSignedState(payload) {
