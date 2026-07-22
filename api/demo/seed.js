@@ -96,6 +96,22 @@ async function ensureDemoShop(inputDomain, inputName) {
 }
 
 async function clearDemoData(shopId) {
+  const [productRows, customerRows, orderRows] = await Promise.all([
+    safeSelectIds("products", shopId),
+    safeSelectIds("customers", shopId),
+    safeSelectIds("orders", shopId),
+  ]);
+  const productIds = productRows.map((row) => row.id).filter(Boolean);
+  const customerIds = customerRows.map((row) => row.id).filter(Boolean);
+  const orderIds = orderRows.map((row) => row.id).filter(Boolean);
+
+  await deleteByIds("order_line_items", "order_id", orderIds);
+  await deleteByIds("order_line_items", "product_id", productIds);
+  await deleteByIds("refunds", "order_id", orderIds);
+  await deleteByIds("orders", "id", orderIds);
+  await deleteByIds("customers", "id", customerIds);
+  await deleteByIds("products", "id", productIds);
+
   const tables = [
     "user_behavior_events",
     "refunds",
@@ -145,6 +161,7 @@ async function clearDemoData(shopId) {
 }
 
 function buildDemoPayload(shop, days) {
+  const idPrefix = demoIdPrefix(shop.id);
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
 
@@ -171,14 +188,14 @@ function buildDemoPayload(shop, days) {
   ];
 
   const products = [
-    { id: "demo_product_01", title: "C16 3-in-1 Multi-Function Juicer", sku: "C16-3IN1", price: 189, vendor: "boHealthy", product_type: "Juicer" },
-    { id: "demo_product_02", title: "Cold Press Blender Pro", sku: "CPB-PRO", price: 159, vendor: "boHealthy", product_type: "Blender" },
-    { id: "demo_product_03", title: "Portable Juice Cup", sku: "PORT-CUP", price: 69, vendor: "boHealthy", product_type: "Cup" },
-    { id: "demo_product_04", title: "Glass Bottle Set", sku: "GLASS-SET", price: 39, vendor: "boHealthy", product_type: "Accessory" },
-    { id: "demo_product_05", title: "Filter Replacement Kit", sku: "FILTER-KIT", price: 29, vendor: "boHealthy", product_type: "Accessory" },
-    { id: "demo_product_06", title: "Smoothie Maker Mini", sku: "SMOOTH-MINI", price: 99, vendor: "boHealthy", product_type: "Blender" },
-    { id: "demo_product_07", title: "Premium Fruit Prep Tool", sku: "PREP-TOOL", price: 24, vendor: "boHealthy", product_type: "Accessory" },
-    { id: "demo_product_08", title: "Family Juicer Bundle", sku: "BUNDLE-FAM", price: 249, vendor: "boHealthy", product_type: "Bundle" },
+    { id: `${idPrefix}_product_01`, title: "C16 3-in-1 Multi-Function Juicer", sku: "C16-3IN1", price: 189, vendor: "boHealthy", product_type: "Juicer" },
+    { id: `${idPrefix}_product_02`, title: "Cold Press Blender Pro", sku: "CPB-PRO", price: 159, vendor: "boHealthy", product_type: "Blender" },
+    { id: `${idPrefix}_product_03`, title: "Portable Juice Cup", sku: "PORT-CUP", price: 69, vendor: "boHealthy", product_type: "Cup" },
+    { id: `${idPrefix}_product_04`, title: "Glass Bottle Set", sku: "GLASS-SET", price: 39, vendor: "boHealthy", product_type: "Accessory" },
+    { id: `${idPrefix}_product_05`, title: "Filter Replacement Kit", sku: "FILTER-KIT", price: 29, vendor: "boHealthy", product_type: "Accessory" },
+    { id: `${idPrefix}_product_06`, title: "Smoothie Maker Mini", sku: "SMOOTH-MINI", price: 99, vendor: "boHealthy", product_type: "Blender" },
+    { id: `${idPrefix}_product_07`, title: "Premium Fruit Prep Tool", sku: "PREP-TOOL", price: 24, vendor: "boHealthy", product_type: "Accessory" },
+    { id: `${idPrefix}_product_08`, title: "Family Juicer Bundle", sku: "BUNDLE-FAM", price: 249, vendor: "boHealthy", product_type: "Bundle" },
   ];
 
   const coupons = [
@@ -199,7 +216,7 @@ function buildDemoPayload(shop, days) {
     const location = pickWeighted(locations, i * 17);
     const first = firstNames[i % firstNames.length];
     const last = lastNames[(i * 3) % lastNames.length];
-    const id = `demo_customer_${String(i).padStart(3, "0")}`;
+    const id = `${idPrefix}_customer_${String(i).padStart(3, "0")}`;
     const customer = {
       id,
       shop_id: shop.id,
@@ -242,7 +259,7 @@ function buildDemoPayload(shop, days) {
       const channel = pickWeighted(channels, dayIndex * 100 + orderIndex * 13);
       const firstProduct = products[(dayIndex + orderIndex) % products.length];
       const secondProduct = products[(dayIndex * 2 + orderIndex * 5) % products.length];
-      const orderId = `demo_order_${dateOnly.replace(/-/g, "")}_${String(orderIndex).padStart(2, "0")}`;
+      const orderId = `${idPrefix}_order_${dateOnly.replace(/-/g, "")}_${String(orderIndex).padStart(2, "0")}`;
       const createdAt = `${dateOnly}T${String(8 + (orderIndex % 11)).padStart(2, "0")}:${String((orderIndex * 7) % 60).padStart(2, "0")}:00.000Z`;
       const lineCount = orderIndex % 4 === 0 ? 2 : 1;
       const coupon = selectCoupon(dayIndex, orderIndex, coupons, customer.orders_count);
@@ -298,7 +315,7 @@ function buildDemoPayload(shop, days) {
       items.forEach((item, itemIndex) => {
         productUnits.set(item.product.id, productUnits.get(item.product.id) + item.quantity);
         lineItems.push({
-          id: `demo_line_item_${dateOnly.replace(/-/g, "")}_${String(orderIndex).padStart(2, "0")}_${itemIndex + 1}`,
+          id: `${idPrefix}_line_item_${dateOnly.replace(/-/g, "")}_${String(orderIndex).padStart(2, "0")}_${itemIndex + 1}`,
           shop_id: shop.id,
           order_id: orderId,
           product_id: item.product.id,
@@ -320,7 +337,7 @@ function buildDemoPayload(shop, days) {
 
       if (refunded > 0) {
         refunds.push({
-          id: `demo_refund_${orderId}`,
+          id: `${idPrefix}_refund_${orderId}`,
           shop_id: shop.id,
           order_id: orderId,
           created_at: createdAt,
@@ -1194,6 +1211,48 @@ function summarizePayload(payload) {
     behavior_event_rows: payload.behaviorEvents.length,
     goals: payload.goals.length,
   };
+}
+
+function demoIdPrefix(shopId) {
+  return `demo_${String(shopId || "shop").replace(/[^a-z0-9]/gi, "").slice(0, 12).toLowerCase() || "shop"}`;
+}
+
+async function safeSelectIds(table, shopId) {
+  try {
+    return await supabaseFetch(
+      `/rest/v1/${table}?shop_id=eq.${encodeURIComponent(shopId)}&select=id&limit=5000`,
+    );
+  } catch (error) {
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+}
+
+async function deleteByIds(table, column, ids) {
+  const uniqueIds = Array.from(new Set((ids || []).filter(Boolean)));
+  if (!uniqueIds.length) return;
+
+  const chunkSize = 100;
+  for (let start = 0; start < uniqueIds.length; start += chunkSize) {
+    const chunk = uniqueIds.slice(start, start + chunkSize);
+    const encoded = chunk.map((id) => `"${String(id).replace(/"/g, '\\"')}"`).join(",");
+    try {
+      await supabaseFetch(`/rest/v1/${table}?${column}=in.(${encodeURIComponent(encoded)})`, {
+        method: "DELETE",
+        headers: { prefer: "return=minimal" },
+      });
+    } catch (error) {
+      if (isMissingTableError(error)) return;
+      error.message = `Failed while clearing ${table}`;
+      error.details = {
+        ...(error.details || {}),
+        table,
+        column,
+        ids: chunk,
+      };
+      throw error;
+    }
+  }
 }
 
 async function touchIntegration(shopId, source, status, config = {}) {

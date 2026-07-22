@@ -3,13 +3,21 @@ module.exports = async function handler(req, res) {
     assertEnv();
 
     if (req.method === "GET") {
-      const [rows, shops] = await Promise.all([
-        supabaseFetch("/rest/v1/data_integrations?select=id,source,status,config,last_connected_at,last_tested_at,last_synced_at,updated_at&order=source.asc"),
-        supabaseFetch("/rest/v1/shops?select=id,shop_domain,shop_name&order=updated_at.desc&limit=1"),
-      ]);
+      const rows = await supabaseFetch(
+        "/rest/v1/data_integrations?select=id,shop_id,source,status,config,last_connected_at,last_tested_at,last_synced_at,updated_at&order=source.asc",
+      );
+      const primaryIntegration = selectPrimaryIntegration(rows);
+      const primaryShopId = primaryIntegration?.shop_id || null;
+      const shops = primaryShopId
+        ? await supabaseFetch(`/rest/v1/shops?id=eq.${encodeURIComponent(primaryShopId)}&select=id,shop_domain,shop_name&limit=1`)
+        : [];
+      const visibleRows = primaryShopId
+        ? rows.filter((row) => row.shop_id === primaryShopId || !row.shop_id)
+        : rows;
+
       return res.status(200).json({
         ok: true,
-        integrations: rows.map((row) => ({
+        integrations: visibleRows.map((row) => ({
           ...row,
           config: redactConfig(row.config || {}),
         })),
@@ -23,13 +31,18 @@ module.exports = async function handler(req, res) {
       const source = String(body.source || "").trim();
       if (!source) return res.status(400).json({ error: "Missing source" });
 
-      const current = await getIntegration(source);
+      const requestedConfig = body.config || {};
+      const explicitShopId =
+        source === "shopify"
+          ? await upsertPrimaryShop(requestedConfig)
+          : await getPrimaryShopId();
+      const current = await getIntegration(source, explicitShopId);
       const currentConfig = current?.config || {};
       const nextConfig = normalizeSourceConfig(
         source,
-        mergeConfig(currentConfig, body.config || {}, body.clear_keys || []),
+        mergeConfig(currentConfig, requestedConfig, body.clear_keys || []),
       );
-      const shopId = source === "shopify" ? await upsertPrimaryShop(nextConfig) : current?.shop_id || null;
+      const shopId = source === "shopify" ? explicitShopId : current?.shop_id || explicitShopId || null;
       const row = {
         ...(shopId ? { shop_id: shopId } : {}),
         source,
@@ -90,11 +103,41 @@ function assertAuthorized(req) {
   }
 }
 
-async function getIntegration(source) {
+async function getIntegration(source, shopId = null) {
+  const shopFilter = shopId ? `&shop_id=eq.${encodeURIComponent(shopId)}` : "";
   const rows = await supabaseFetch(
-    `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}&select=id,shop_id,config&limit=1`,
+    `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}${shopFilter}&select=id,shop_id,config,status,last_connected_at,last_tested_at,last_synced_at,updated_at&order=updated_at.desc&limit=20`,
   );
-  return rows[0] || null;
+  return selectPrimaryIntegration(rows, source) || rows[0] || null;
+}
+
+async function getPrimaryShopId() {
+  const rows = await supabaseFetch(
+    "/rest/v1/data_integrations?select=id,shop_id,source,status,config,last_connected_at,last_tested_at,last_synced_at,updated_at&order=updated_at.desc&limit=100",
+  );
+  return selectPrimaryIntegration(rows)?.shop_id || null;
+}
+
+function selectPrimaryIntegration(rows, source = "") {
+  const scopedRows = (rows || []).filter((row) => !source || row?.source === source);
+  if (!scopedRows.length) return null;
+
+  const shopifyRows = scopedRows.filter((row) => row?.source === "shopify");
+  const nonDemoShopifyRows = shopifyRows.filter((row) => String(row?.config?.auth_mode || "").trim().toLowerCase() !== "demo");
+
+  if (nonDemoShopifyRows.length) return latestIntegration(nonDemoShopifyRows);
+  if (shopifyRows.length) return latestIntegration(shopifyRows);
+  return latestIntegration(scopedRows);
+}
+
+function latestIntegration(rows) {
+  return [...rows].sort((a, b) => integrationTimestamp(b) - integrationTimestamp(a))[0] || null;
+}
+
+function integrationTimestamp(row) {
+  return (
+    Date.parse(row?.updated_at || row?.last_synced_at || row?.last_connected_at || row?.last_tested_at || 0) || 0
+  );
 }
 
 async function upsertPrimaryShop(config) {
