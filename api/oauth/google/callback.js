@@ -11,7 +11,8 @@ const {
 } = require("./_shared");
 
 const GOOGLE_GA4_API_BASE = "https://analyticsdata.googleapis.com/v1beta";
-const GOOGLE_ADS_API_BASE = "https://googleads.googleapis.com/v19";
+const GOOGLE_ADS_API_VERSION = String(process.env.GOOGLE_ADS_API_VERSION || "v24").trim();
+const GOOGLE_ADS_API_BASE = `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}`;
 const GOOGLE_SEARCH_CONSOLE_API_BASE = "https://www.googleapis.com/webmasters/v3";
 
 module.exports = async function handler(req, res) {
@@ -299,6 +300,15 @@ function describeGoogleOauthCallbackError(details) {
   }
   if (combined.includes("login-customer-id")) {
     return "Login Customer ID 不正确，请检查 MCC 经理账号";
+  }
+  if (combined.includes("permission_denied") || combined.includes("does not have sufficient permissions")) {
+    return "GA4 权限不足：请确认当前 Google 账号有该 GA4 媒体资源的查看者或管理员权限";
+  }
+  if (combined.includes("property") && (combined.includes("not found") || combined.includes("invalid") || combined.includes("does not exist"))) {
+    return "GA4 Property ID 无效：请填写媒体资源 ID，不是账号 ID";
+  }
+  if (combined.includes("analyticsdata.googleapis.com") || combined.includes("has not been used") || combined.includes("disabled")) {
+    return "Google Analytics Data API 未启用：请在 Google Cloud 项目中启用该 API 后重试";
   }
   if (combined.includes("user_permission_denied") || combined.includes("permission")) {
     return "当前 Google 账号没有访问该 Google Ads 账户的权限";

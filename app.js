@@ -2926,7 +2926,7 @@ async function startGoogleOAuth(button) {
       body: JSON.stringify({ source }),
     });
     const data = await response.json();
-    if (!response.ok || !data.ok || !data.auth_url) throw new Error(data.error || "无法发起 Google 授权");
+    if (!response.ok || !data.ok || !data.auth_url) throw new Error(describeApiError(data, "无法发起 Google 授权"));
     window.location.href = data.auth_url;
   } catch (error) {
     showToast(`Google 授权启动失败：${error.message}`);
@@ -2963,7 +2963,7 @@ async function runGa4Sync(mode = "sync") {
     const suffix = mode === "test" ? "&mode=test" : "";
     const response = await fetch(`/api/sync/ga4?secret=${encodeURIComponent(state.integrationSecret)}${suffix}`);
     const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data.error || "GA4 同步失败");
+    if (!response.ok || !data.ok) throw new Error(describeApiError(data, "GA4 同步失败"));
     await loadIntegrationConfigs();
     if (mode === "test") {
       showToast(`GA4 连接测试通过：Property ${data.property_id}`);
@@ -3007,7 +3007,7 @@ async function runGoogleAdsSync(mode = "sync") {
     const suffix = mode === "test" ? "&mode=test" : "";
     const response = await fetch(`/api/sync/google-ads?secret=${encodeURIComponent(state.integrationSecret)}${suffix}`);
     const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data.error || "Google Ads 同步失败");
+    if (!response.ok || !data.ok) throw new Error(describeApiError(data, "Google Ads 同步失败"));
     await loadIntegrationConfigs();
     if (mode === "test") {
       showToast(`Google Ads 连接测试通过：${data.customer_name || data.customer_id}`);
@@ -3122,6 +3122,8 @@ function describeApiError(data, fallback) {
 
   if (typeof details === "string") return `${base}：${details}`;
   if (details.message) return `${base}：${details.message}`;
+  if (Array.isArray(details.fix)) return `${base}：${details.fix.join("；")}`;
+  if (details.fix) return `${base}：${details.fix}`;
   if (details.table) {
     const hint = details.code || details.hint || details.details || "";
     return `${base}（${details.table}${hint ? ` · ${hint}` : ""}）`;

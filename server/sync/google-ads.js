@@ -1,5 +1,6 @@
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
-const GOOGLE_ADS_API_BASE = "https://googleads.googleapis.com/v19";
+const GOOGLE_ADS_API_VERSION = String(process.env.GOOGLE_ADS_API_VERSION || "v24").trim();
+const GOOGLE_ADS_API_BASE = `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}`;
 const DEFAULT_LOOKBACK_DAYS = 30;
 
 module.exports = async function handler(req, res) {

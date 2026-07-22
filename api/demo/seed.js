@@ -97,29 +97,51 @@ async function ensureDemoShop(inputDomain, inputName) {
 
 async function clearDemoData(shopId) {
   const tables = [
-    "sync_state",
-    "goals",
-    "coupon_codes",
-    "audience_segments",
-    "traffic_attribution_daily",
-    "ad_daily_metrics",
-    "ga4_daily_metrics",
     "user_behavior_events",
     "refunds",
     "order_line_items",
     "orders",
+    "search_console_metrics",
+    "traffic_attribution_daily",
+    "audience_segments",
+    "ad_daily_metrics",
+    "ga4_daily_metrics",
+    "coupon_codes",
+    "goals",
+    "sync_state",
+    "data_integrations",
     "products",
     "customers",
   ];
+  const cleared = [];
+  const skipped = [];
 
   for (const table of tables) {
-    await supabaseFetch(`/rest/v1/${table}?shop_id=eq.${encodeURIComponent(shopId)}`, {
-      method: "DELETE",
-      headers: { prefer: "return=minimal" },
-    });
+    try {
+      await supabaseFetch(`/rest/v1/${table}?shop_id=eq.${encodeURIComponent(shopId)}`, {
+        method: "DELETE",
+        headers: { prefer: "return=minimal" },
+      });
+      cleared.push(table);
+    } catch (error) {
+      if (isMissingTableError(error)) {
+        skipped.push(table);
+        continue;
+      }
+      error.message = `Failed while clearing ${table}`;
+      error.details = {
+        ...(error.details || {}),
+        table,
+      };
+      throw error;
+    }
   }
 
-  return tables.length;
+  return {
+    tables: cleared.length,
+    cleared,
+    skipped,
+  };
 }
 
 function buildDemoPayload(shop, days) {
@@ -1267,6 +1289,29 @@ async function upsertBatch(table, rows, conflictColumns) {
       throw error;
     }
   }
+}
+
+function isMissingTableError(error) {
+  const details = error?.details || {};
+  const text = [
+    error?.message,
+    details.message,
+    details.details,
+    details.hint,
+    details.code,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    details.code === "42P01" ||
+    details.code === "PGRST205" ||
+    details.code === "PGRST204" ||
+    text.includes("schema cache") ||
+    text.includes("does not exist") ||
+    text.includes("could not find the table")
+  );
 }
 
 function selectCoupon(dayIndex, orderIndex, coupons, customerOrdersCount) {
