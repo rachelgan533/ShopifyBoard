@@ -590,12 +590,13 @@ async function shopifyGraphql(shopDomain, accessToken, query, variables) {
 
 async function upsertBatch(table, rows, onConflict) {
   if (!rows.length) return;
+  const normalizedRows = normalizeBatchRows(rows);
   await supabaseFetch(`/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`, {
     method: "POST",
     headers: {
       prefer: "resolution=merge-duplicates,return=minimal",
     },
-    body: JSON.stringify(rows),
+    body: JSON.stringify(normalizedRows),
   });
 }
 
@@ -634,6 +635,22 @@ function moneyCurrency(value) {
 
 function numberOrZero(value) {
   return Number(value || 0);
+}
+
+function normalizeBatchRows(rows) {
+  const keys = [...rows.reduce((set, row) => {
+    Object.keys(row || {}).forEach((key) => set.add(key));
+    return set;
+  }, new Set())];
+
+  return rows.map((row) => {
+    const normalized = {};
+    for (const key of keys) {
+      const value = row?.[key];
+      normalized[key] = value === undefined ? null : value;
+    }
+    return normalized;
+  });
 }
 
 function normalizeShopDomain(value) {
