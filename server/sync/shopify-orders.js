@@ -28,6 +28,26 @@ const SHOPIFY_ORDER_QUERY = `
             ready
             customerOrderIndex
             daysToConversion
+            moments(first: 20, reverse: true) {
+              nodes {
+                occurredAt
+                ... on CustomerVisit {
+                  source
+                  sourceDescription
+                  sourceType
+                  referrerUrl
+                  landingPage
+                  referralCode
+                  utmParameters {
+                    source
+                    medium
+                    campaign
+                    content
+                    term
+                  }
+                }
+              }
+            }
             lastVisit {
               occurredAt
               source

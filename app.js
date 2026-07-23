@@ -17,7 +17,7 @@ const pageMeta = {
   personas: ["用户画像", "近 30 天 · 多源真实数据"],
   operations: ["运营数据看板", "近 30 天"],
   marketing: ["营销分析", "近 30 天 · 加载中..."],
-  attribution: ["归因分析", "近 30 天 · Shopify last click"],
+  attribution: ["归因分析", "近 30 天 · Shopify 最终非直接点击优先"],
   customers: ["客户分析", "近 30 天 · Shopify 真实数据"],
   behavior: ["用户行为分析", "近 30 天 · 站内路径与行为漏斗"],
   aarrr: ["AARRR 分析", "近 30 天"],
@@ -1126,7 +1126,7 @@ function renderAttributionDashboard(data) {
     metricCard("流量转化", `${formatNumber(trafficSummary.cvr)}%`, compareDelta(trafficSummary.cvr, previousTrafficAttribution.summary?.cvr), "GA4", trafficCvrSeries),
     metricCard("归因订单", formatInteger(summary.orders), compareDelta(summary.orders, previousAttribution.summary?.orders), "Shopify", attributionOrdersSeries),
     metricCard("归因销售额", formatCurrency(summary.revenue), compareDelta(summary.revenue, previousAttribution.summary?.revenue), "Shopify", attributionRevenueSeries),
-    metricCard("Last Click 就绪", formatInteger(quality.ready_orders), compareDelta(quality.ready_orders, previousAttribution.quality?.ready_orders), "Shopify", attributionReadySeries),
+    metricCard("Journey 就绪", formatInteger(quality.ready_orders), compareDelta(quality.ready_orders, previousAttribution.quality?.ready_orders), "Shopify", attributionReadySeries),
   ];
 
   const trafficSessionRows = trafficChannelRows.slice(0, 8).map((row) => [prettyTrafficChannel(row), Number(row.sessions || 0), formatInteger(row.sessions)]);
@@ -1335,7 +1335,7 @@ function renderAttributionDashboard(data) {
     )}
     ${section(
       "流量 vs 订单 对照",
-      "把 GA4 的流量归因和 Shopify 的 last-click 订单归因放到同一张表里看效率差异。",
+      "把 GA4 的流量归因和 Shopify 最终非直接点击优先的订单归因放到同一张表里看效率差异。",
       "",
       tableCard(
         "",
@@ -1404,8 +1404,8 @@ function renderAttributionDashboard(data) {
     </div>
     ${section(
       "归因总览",
-      "以 Shopify last click 为主口径；若 last click 尚未就绪，则回退到订单来源字段。",
-      `${pill("Shopify")} ${pill("Last Click")}`,
+      "以 Shopify customer journey 中最终非直接点击优先；若 journey 尚未就绪，则回退到 lastVisit / 订单来源字段。",
+      `${pill("Shopify")} ${pill("Final Non-Direct Click")}`,
       `<div class="grid cols-3">
         <div class="card pad">
           <div class="metric-label">已归因订单占比</div>
@@ -1455,7 +1455,7 @@ function renderAttributionDashboard(data) {
       "当前顶部时间范围内，各一级归因渠道的按日订单趋势。",
       "",
       trendSeries.length
-        ? multiLineTrendCard("Last Click 渠道订单趋势", trendRows, trendSeries)
+        ? multiLineTrendCard("最终非直接点击渠道订单趋势", trendRows, trendSeries)
         : personaEmptyState("当前还没有足够的归因趋势数据"),
     )}
     <div class="grid cols-2">
@@ -1497,7 +1497,7 @@ function renderAttributionDashboard(data) {
       "帮助判断 last-click 就绪度、回退命中率和待补归因订单量。",
       "",
       `<div class="grid cols-4">
-        ${simpleMetric("Last Click Ready", formatInteger(quality.ready_orders), compareDelta(quality.ready_orders, previousAttribution.quality?.ready_orders))}
+        ${simpleMetric("Journey Ready", formatInteger(quality.ready_orders), compareDelta(quality.ready_orders, previousAttribution.quality?.ready_orders))}
         ${simpleMetric("Fallback 命中", formatInteger(quality.fallback_orders), compareDelta(quality.fallback_orders, previousAttribution.quality?.fallback_orders))}
         ${simpleMetric("Pending", formatInteger(quality.pending_orders), compareDelta(quality.pending_orders, previousAttribution.quality?.pending_orders))}
         ${simpleMetric("Unknown", formatInteger(quality.unknown_orders), compareDelta(quality.unknown_orders, previousAttribution.quality?.unknown_orders))}
@@ -1996,7 +1996,7 @@ function marketingPage() {
 }
 
 function attributionPage() {
-  return `<div data-attribution-content>${personaEmptyState("正在加载归因分析数据…", "将按 Shopify last click 归因，并在缺失时回退到订单来源字段。")}</div>`;
+  return `<div data-attribution-content>${personaEmptyState("正在加载归因分析数据…", "将优先按 Shopify customer journey 中的最终非直接点击归因，缺失时再回退到 lastVisit / 订单来源字段。")}</div>`;
 }
 
 function customersPage() {
@@ -2351,6 +2351,20 @@ function integrationPage() {
                   <div class="metric-label" data-integration-field="last_synced_at">—</div>
                 </div>
               </div>
+              ${
+                source === "shopify"
+                  ? `<div class="grid cols-2" style="margin-bottom:14px">
+                      <div class="card pad">
+                        <div class="muted">Synced Orders · 已同步订单数</div>
+                        <div class="metric-label" data-integration-field="synced_order_count">0</div>
+                      </div>
+                      <div class="card pad">
+                        <div class="muted">Order Range · 已同步订单时间范围</div>
+                        <div class="metric-label" data-integration-field="synced_order_range">—</div>
+                      </div>
+                    </div>`
+                  : ""
+              }
               <div class="form-grid">
                 ${fields
                   .map(([key, label, value, kind]) => `
@@ -2994,7 +3008,7 @@ async function startGoogleOAuth(button) {
       },
       body: JSON.stringify({ source }),
     });
-    const data = await response.json();
+    const data = await readApiJson(response, "无法发起 Google 授权");
     if (!response.ok || !data.ok || !data.auth_url) throw new Error(describeApiError(data, "无法发起 Google 授权"));
     window.location.href = data.auth_url;
   } catch (error) {
@@ -3359,6 +3373,9 @@ async function loadIntegrationConfigs() {
       if (item.source === "shopify") {
         const shopName = item.config?.shop_name || data.primary_shop?.shop_name;
         if (shopName) updateStoreIdentity(shopName);
+        const syncOverview = item.meta?.sync_overview || {};
+        updateIntegrationField(card, "synced_order_count", formatInteger(syncOverview.order_count || 0));
+        updateIntegrationField(card, "synced_order_range", formatOrderRange(syncOverview.first_order_at, syncOverview.last_order_at));
       }
     }
 
@@ -3424,6 +3441,11 @@ function integrationStatusDetail(status) {
 
 function formatMaybeDate(value) {
   return value ? formatDateTime(value) : "—";
+}
+
+function formatOrderRange(start, end) {
+  if (!start || !end) return "—";
+  return `${formatShortDate(start)} → ${formatShortDate(end)}`;
 }
 
 async function loadCoupons() {
@@ -4798,6 +4820,14 @@ function formatDateTime(value) {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+  }).format(new Date(value));
+}
+
+function formatShortDate(value) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
   }).format(new Date(value));
 }
 

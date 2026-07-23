@@ -8,6 +8,7 @@ module.exports = async function handler(req, res) {
       );
       const primaryIntegration = selectPrimaryIntegration(rows);
       const primaryShopId = primaryIntegration?.shop_id || null;
+      const shopifySyncOverview = primaryShopId ? await getShopifySyncOverview(primaryShopId) : null;
       const shops = primaryShopId
         ? await supabaseFetch(`/rest/v1/shops?id=eq.${encodeURIComponent(primaryShopId)}&select=id,shop_domain,shop_name&limit=1`)
         : [];
@@ -19,6 +20,7 @@ module.exports = async function handler(req, res) {
         ok: true,
         integrations: visibleRows.map((row) => ({
           ...row,
+          meta: row.source === "shopify" ? { sync_overview: shopifySyncOverview } : undefined,
           config: redactConfig(row.config || {}),
         })),
         primary_shop: shops[0] || null,
@@ -251,6 +253,27 @@ function redactConfig(config) {
   return redacted;
 }
 
+async function getShopifySyncOverview(shopId) {
+  const encodedShopId = encodeURIComponent(shopId);
+  const [firstOrderRows, lastOrderRows, orderCount, syncRows] = await Promise.all([
+    supabaseFetch(`/rest/v1/orders?shop_id=eq.${encodedShopId}&select=created_at&order=created_at.asc&limit=1`),
+    supabaseFetch(`/rest/v1/orders?shop_id=eq.${encodedShopId}&select=created_at&order=created_at.desc&limit=1`),
+    supabaseCount(`/rest/v1/orders?shop_id=eq.${encodedShopId}&select=id`),
+    supabaseFetch(
+      `/rest/v1/sync_state?shop_id=eq.${encodedShopId}&source=eq.shopify&resource=eq.orders&select=last_synced_at,status,cursor,updated_at&limit=1`,
+    ),
+  ]);
+
+  const sync = syncRows[0] || null;
+  return {
+    order_count: orderCount,
+    first_order_at: firstOrderRows[0]?.created_at || null,
+    last_order_at: lastOrderRows[0]?.created_at || null,
+    checkpoint_at: sync?.last_synced_at || null,
+    has_more: Boolean(sync?.cursor && sync?.status === "running"),
+  };
+}
+
 async function readJson(req) {
   if (req.body && typeof req.body === "object") return req.body;
   if (typeof req.body === "string") return req.body ? JSON.parse(req.body) : {};
@@ -313,6 +336,31 @@ async function supabaseFetch(path, options = {}) {
   }
 
   return body || [];
+}
+
+async function supabaseCount(path) {
+  const baseUrl = trimSlash(process.env.SUPABASE_URL);
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "HEAD",
+    headers: {
+      apikey: process.env.SUPABASE_SECRET_KEY,
+      authorization: `Bearer ${process.env.SUPABASE_SECRET_KEY}`,
+      prefer: "count=exact",
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    const body = text ? JSON.parse(text) : null;
+    const error = new Error("Supabase request failed");
+    error.statusCode = response.status;
+    error.details = body;
+    throw error;
+  }
+
+  const contentRange = String(response.headers.get("content-range") || "");
+  const match = contentRange.match(/\/(\d+|\*)$/);
+  return match && match[1] !== "*" ? Number(match[1]) : 0;
 }
 
 function trimSlash(value) {

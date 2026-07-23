@@ -1882,7 +1882,8 @@ function finalizeAttributionOwners(map, totalOrders) {
 function deriveOrderAttribution(row, couponMeta) {
   const raw = row.raw && typeof row.raw === "object" ? row.raw : {};
   const journey = raw.customerJourneySummary || {};
-  const visit = journey.lastVisit || null;
+  const selectedVisit = selectPreferredJourneyVisit(journey);
+  const visit = selectedVisit || journey.lastVisit || null;
   const utm = visit?.utmParameters || {};
   const rawCodes = Array.isArray(row.discount_codes) ? row.discount_codes : [];
   const discountCodes = rawCodes.map((code) => String(code || "").trim()).filter(Boolean);
@@ -1923,7 +1924,7 @@ function deriveOrderAttribution(row, couponMeta) {
 
   return {
     ready: Boolean(journey.ready),
-    used_fallback: !visit,
+    used_fallback: !selectedVisit,
     days_to_conversion: typeof journey.daysToConversion === "number" ? journey.daysToConversion : null,
     channel: classification.channel,
     subchannel: classification.subchannel,
@@ -1932,22 +1933,19 @@ function deriveOrderAttribution(row, couponMeta) {
     referral_code: referralCode,
     utm_source: utmSource,
     utm_campaign: utmCampaign,
+    attribution_source: source,
+    attribution_source_description: sourceDescription,
+    attribution_source_type: sourceType,
   };
 }
 
 function isGoogleAdsPaidAttribution(row, snapshot) {
   if (snapshot.channel !== "ads") return false;
 
-  const raw = row.raw && typeof row.raw === "object" ? row.raw : {};
-  const visit = raw.customerJourneySummary?.lastVisit || {};
-  const utm = visit.utmParameters || {};
   const haystack = [
-    visit.source,
-    visit.sourceDescription,
-    visit.sourceType,
-    utm.source,
-    utm.medium,
-    utm.campaign,
+    snapshot.attribution_source,
+    snapshot.attribution_source_description,
+    snapshot.attribution_source_type,
     row.source_name,
     snapshot.utm_source,
     snapshot.utm_campaign,
@@ -1957,6 +1955,33 @@ function isGoogleAdsPaidAttribution(row, snapshot) {
     .toLowerCase();
 
   return /google|adwords|gads/.test(haystack);
+}
+
+function selectPreferredJourneyVisit(journey) {
+  const moments = Array.isArray(journey?.moments?.nodes) ? journey.moments.nodes : [];
+  if (!moments.length) return journey?.lastVisit || null;
+
+  const orderedMoments = [...moments].sort(
+    (a, b) => (Date.parse(b?.occurredAt || 0) || 0) - (Date.parse(a?.occurredAt || 0) || 0),
+  );
+
+  const lastNonDirect = orderedMoments.find((visit) => !isDirectJourneyVisit(visit));
+  return lastNonDirect || journey?.lastVisit || orderedMoments[0] || null;
+}
+
+function isDirectJourneyVisit(visit) {
+  const source = String(visit?.source || "").trim().toLowerCase();
+  const sourceDescription = String(visit?.sourceDescription || "").trim().toLowerCase();
+  const sourceType = String(visit?.sourceType || "").trim().toLowerCase();
+  const utm = visit?.utmParameters || {};
+  const utmSource = String(utm.source || "").trim().toLowerCase();
+  const utmMedium = String(utm.medium || "").trim().toLowerCase();
+  const referrerUrl = String(visit?.referrerUrl || "").trim().toLowerCase();
+
+  if (!source && !sourceDescription && !utmSource && !utmMedium && !referrerUrl) return true;
+  if (source === "direct") return true;
+  if (/direct/.test([source, sourceDescription, sourceType, utmMedium].join(" "))) return true;
+  return false;
 }
 
 function classifyAttribution(snapshot) {
