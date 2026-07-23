@@ -6,7 +6,7 @@ const SHOPIFY_ORDER_QUERY = `
       currencyCode
       ianaTimezone
     }
-    orders(first: $first, after: $after, sortKey: UPDATED_AT, query: $query) {
+    orders(first: $first, after: $after, sortKey: UPDATED_AT, reverse: false, query: $query) {
       pageInfo {
         hasNextPage
         endCursor
@@ -210,11 +210,11 @@ async function syncShopifyOrders(mode = "sync") {
     };
   }
 
-  let cursor = null;
+  let cursor = syncState?.cursor || null;
   let pages = 0;
   let importedOrders = 0;
   let importedLineItems = 0;
-  let lastCursor = null;
+  let lastCursor = syncState?.cursor || null;
   let latestUpdatedAt = updatedAfter;
 
   while (pages < maxPages) {
@@ -270,6 +270,7 @@ async function syncShopifyOrders(mode = "sync") {
     imported_line_items: importedLineItems,
     has_more: Boolean(lastCursor && pages >= maxPages),
     next_cursor: lastCursor,
+    resumed_from_cursor: Boolean(syncState?.cursor),
   };
 
   await touchIntegration("shopify", {

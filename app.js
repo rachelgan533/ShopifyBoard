@@ -1107,6 +1107,11 @@ function renderAttributionDashboard(data) {
   const topAffiliate = attribution.top_affiliate || [];
   const trafficTrendRows = trafficAttribution.daily || [];
   const trendRows = attribution.daily || [];
+  const googleAdsYoY = data.google_ads_yoy || {};
+  const googleAdsYoYRows = googleAdsYoY.monthly || [];
+  const googleAdsYoYTotals = googleAdsYoY.totals || {};
+  const previousYoYYear = googleAdsYoY.previous_year || "";
+  const currentYoYYear = googleAdsYoY.current_year || "";
   const efficiencyQuadrants = buildAttributionEfficiencyQuadrants(attributionComparison);
   const trafficSessionsSeries = trafficTrendRows.map((row) => ({ label: row.day, value: Number(row.sessions_total || 0) }));
   const trafficUsersSeries = trafficTrendRows.map((row) => ({ label: row.day, value: Number(row.users_total || 0) }));
@@ -1157,11 +1162,73 @@ function renderAttributionDashboard(data) {
     { key: "kol", label: "KOL", color: "#f59e0b" },
     { key: "affiliate", label: "Affiliate", color: "#7a55dc" },
   ].filter((item) => trendRows.some((row) => Number(row[item.key] || 0) > 0));
+  const googleAdsMonthlyRows = googleAdsYoYRows.map((row) => [
+    row.label,
+    `${formatCurrency(row.shopify_paid_previous_revenue)} · ${formatInteger(row.shopify_paid_previous_orders)} 单`,
+    `${formatCurrency(row.shopify_paid_current_revenue)} · ${formatInteger(row.shopify_paid_current_orders)} 单`,
+    `${row.shopify_paid_yoy >= 0 ? "+" : ""}${formatNumber(row.shopify_paid_yoy)}%`,
+    `${formatCurrency(row.google_ads_previous_revenue)} · ${formatInteger(row.google_ads_previous_conversions)} 转化`,
+    `${formatCurrency(row.google_ads_current_revenue)} · ${formatInteger(row.google_ads_current_conversions)} 转化`,
+    `${row.google_ads_yoy >= 0 ? "+" : ""}${formatNumber(row.google_ads_yoy)}%`,
+  ]);
 
   return `
     <div class="grid cols-5 metric-grid-auto">
       ${overviewCards.join("")}
     </div>
+    ${section(
+      "Google Ads 月度对比",
+      "把 Shopify 后台里识别为 Google Ads 付费归因的订单，与 Google Ads API 回传的 conversions value，按去年/今年同月并排对比。",
+      `${pill("Shopify Paid Attribution")} ${pill("Google Ads Conversion Value")}`,
+      `<div class="grid cols-4">
+        ${metricCard(
+          `${currentYoYYear} Shopify Google Ads 归因GMV`,
+          formatCurrency(googleAdsYoYTotals.shopify_paid_current_revenue || 0),
+          compareDelta(googleAdsYoYTotals.shopify_paid_current_revenue, googleAdsYoYTotals.shopify_paid_previous_revenue),
+          "Shopify",
+        )}
+        ${metricCard(
+          `${currentYoYYear} Google Ads 转化价值`,
+          formatCurrency(googleAdsYoYTotals.google_ads_current_revenue || 0),
+          compareDelta(googleAdsYoYTotals.google_ads_current_revenue, googleAdsYoYTotals.google_ads_previous_revenue),
+          "Google Ads",
+        )}
+        ${metricCard(
+          `${currentYoYYear} Shopify 归因订单`,
+          formatInteger(googleAdsYoYTotals.shopify_paid_current_orders || 0),
+          compareDelta(googleAdsYoYTotals.shopify_paid_current_orders, googleAdsYoYTotals.shopify_paid_previous_orders),
+          "Shopify",
+        )}
+        ${metricCard(
+          `${currentYoYYear} Google Ads 转化数`,
+          formatInteger(googleAdsYoYTotals.google_ads_current_conversions || 0),
+          compareDelta(googleAdsYoYTotals.google_ads_current_conversions, googleAdsYoYTotals.google_ads_previous_conversions),
+          "Google Ads",
+        )}
+      </div>${tableCard(
+        "",
+        [
+          "月份",
+          `${previousYoYYear} Shopify 归因GMV`,
+          `${currentYoYYear} Shopify 归因GMV`,
+          "Shopify YoY",
+          `${previousYoYYear} Google Ads 转化价值`,
+          `${currentYoYYear} Google Ads 转化价值`,
+          "Google Ads YoY",
+        ],
+        googleAdsMonthlyRows.length
+          ? googleAdsMonthlyRows
+          : [[
+              "暂无数据",
+              formatCurrency(0),
+              formatCurrency(0),
+              "0.00%",
+              formatCurrency(0),
+              formatCurrency(0),
+              "0.00%",
+            ]],
+      )}`,
+    )}
     ${section(
       "流量归因总览",
       "以 GA4 sessionDefaultChannelGroup 为基础，统一映射到 direct / organic / ads / edm / community / sns / pr / kol / affiliate。",
@@ -2951,6 +3018,14 @@ async function runShopifySync(mode = "sync") {
     }
     state.dashboardData = null;
     await hydrateDashboardData();
+    if (data.has_more) {
+      showToast(`Shopify 已同步 ${data.imported_orders} 单，仍有更多历史数据。继续点“手动同步”直到不再提示还有更多数据。`);
+      return;
+    }
+    if (!Number(data.imported_orders || 0)) {
+      showToast(`Shopify 同步完成，但从 ${String(data.updated_after || "").slice(0, 10) || "当前起点"} 开始没有找到可导入订单。`);
+      return;
+    }
     showToast(`Shopify 同步完成：订单 ${data.imported_orders}，明细 ${data.imported_line_items}`);
   } catch (error) {
     showToast(`同步失败：${error.message}`);

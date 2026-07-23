@@ -8,6 +8,7 @@ module.exports = async function handler(req, res) {
 
     const range = readDateRange(req.query);
     const previousRange = derivePreviousRange(range);
+    const monthlyCompareRange = buildMonthlyCompareRange(new Date());
     const [
       orderRows,
       previousOrderRows,
@@ -28,6 +29,8 @@ module.exports = async function handler(req, res) {
       syncRows,
       integrationRows,
       audienceRows,
+      monthlyOrderRows,
+      monthlyAdRows,
     ] = await Promise.all([
       supabaseFetch(
         `/rest/v1/orders?select=id,customer_id,total_price,subtotal_price,total_refunded,created_at,source_name,customer_country,customer_province,customer_city,discount_codes,landing_site,referring_site,raw&created_at=gte.${encodeURIComponent(range.startIso)}&created_at=lte.${encodeURIComponent(range.endIso)}&limit=20000`,
@@ -82,6 +85,12 @@ module.exports = async function handler(req, res) {
       supabaseFetch(
         "/rest/v1/audience_segments?select=source,segment_type,segment_name,users,percentage,affinity,day&order=day.desc&limit=5000",
       ),
+      supabaseFetch(
+        `/rest/v1/orders?select=id,customer_id,total_price,subtotal_price,total_refunded,created_at,source_name,customer_country,customer_province,customer_city,discount_codes,landing_site,referring_site,raw&created_at=gte.${encodeURIComponent(monthlyCompareRange.startIso)}&created_at=lte.${encodeURIComponent(monthlyCompareRange.endIso)}&limit=50000`,
+      ),
+      supabaseFetch(
+        `/rest/v1/ad_daily_metrics?select=day,source,spend,revenue,impressions,clicks,purchases&day=gte.${monthlyCompareRange.start}&day=lte.${monthlyCompareRange.end}&limit=30000`,
+      ),
     ]);
 
     const orderIds = new Set(orderRows.map((row) => row.id));
@@ -124,6 +133,7 @@ module.exports = async function handler(req, res) {
     const activeGoal = await buildActiveGoal(goalRows[0], range, summary, ga4Funnel);
     const audience = buildAudienceOverview(audienceRows);
     const shopifyPersona = buildShopifyPersona(orderRows, customerQuality.summary, summary, customerSegments);
+    const googleAdsYoY = buildGoogleAdsYoYComparison(monthlyOrderRows, monthlyAdRows, couponRows, monthlyCompareRange);
 
     return res.status(200).json({
       ok: true,
@@ -152,6 +162,7 @@ module.exports = async function handler(req, res) {
       ga4_daily: ga4Daily,
       ad_performance: adPerformance,
       ad_daily: adDaily,
+      google_ads_yoy: googleAdsYoY,
       audience,
       shopify_persona: shopifyPersona,
       previous: {
@@ -731,6 +742,21 @@ function derivePreviousRange(range) {
     end,
     startIso: `${start}T00:00:00.000Z`,
     endIso: `${end}T23:59:59.999Z`,
+  };
+}
+
+function buildMonthlyCompareRange(today) {
+  const currentYear = today.getUTCFullYear();
+  const previousYear = currentYear - 1;
+  const currentMonth = today.getUTCMonth() + 1;
+  return {
+    previousYear,
+    currentYear,
+    currentMonth,
+    start: `${previousYear}-01-01`,
+    end: `${currentYear}-12-31`,
+    startIso: `${previousYear}-01-01T00:00:00.000Z`,
+    endIso: `${currentYear}-12-31T23:59:59.999Z`,
   };
 }
 
@@ -1744,6 +1770,103 @@ function buildAttributionData(orderRows, couponRows) {
   };
 }
 
+function buildGoogleAdsYoYComparison(orderRows, adRows, couponRows, rangeMeta) {
+  const couponMeta = new Map();
+  couponRows.forEach((row) => {
+    const code = String(row.code || "").trim();
+    if (!code) return;
+    couponMeta.set(code.toLowerCase(), {
+      category: String(row.category || "").trim(),
+      owner: String(row.owner || "").trim(),
+    });
+  });
+
+  const monthBuckets = new Map();
+  for (let month = 1; month <= rangeMeta.currentMonth; month += 1) {
+    const key = String(month).padStart(2, "0");
+    monthBuckets.set(key, {
+      month: key,
+      label: `${month}月`,
+      shopify_paid_previous_revenue: 0,
+      shopify_paid_previous_orders: 0,
+      shopify_paid_current_revenue: 0,
+      shopify_paid_current_orders: 0,
+      google_ads_previous_revenue: 0,
+      google_ads_previous_conversions: 0,
+      google_ads_current_revenue: 0,
+      google_ads_current_conversions: 0,
+    });
+  }
+
+  orderRows.forEach((row) => {
+    const day = String(row.created_at || "").slice(0, 10);
+    if (!day) return;
+    const year = Number(day.slice(0, 4));
+    const month = day.slice(5, 7);
+    const bucket = monthBuckets.get(month);
+    if (!bucket) return;
+
+    const snapshot = deriveOrderAttribution(row, couponMeta);
+    if (!isGoogleAdsPaidAttribution(row, snapshot)) return;
+
+    if (year === rangeMeta.previousYear) {
+      bucket.shopify_paid_previous_orders += 1;
+      bucket.shopify_paid_previous_revenue += number(row.total_price);
+    }
+    if (year === rangeMeta.currentYear) {
+      bucket.shopify_paid_current_orders += 1;
+      bucket.shopify_paid_current_revenue += number(row.total_price);
+    }
+  });
+
+  adRows.forEach((row) => {
+    if (String(row.source || "") !== "google_ads") return;
+    const day = String(row.day || "");
+    const year = Number(day.slice(0, 4));
+    const month = day.slice(5, 7);
+    const bucket = monthBuckets.get(month);
+    if (!bucket) return;
+
+    if (year === rangeMeta.previousYear) {
+      bucket.google_ads_previous_revenue += number(row.revenue);
+      bucket.google_ads_previous_conversions += number(row.purchases);
+    }
+    if (year === rangeMeta.currentYear) {
+      bucket.google_ads_current_revenue += number(row.revenue);
+      bucket.google_ads_current_conversions += number(row.purchases);
+    }
+  });
+
+  const monthly = Array.from(monthBuckets.values())
+    .map((row) => ({
+      ...row,
+      shopify_paid_previous_revenue: round(row.shopify_paid_previous_revenue),
+      shopify_paid_current_revenue: round(row.shopify_paid_current_revenue),
+      google_ads_previous_revenue: round(row.google_ads_previous_revenue),
+      google_ads_current_revenue: round(row.google_ads_current_revenue),
+      shopify_paid_yoy: round(changeRate(row.shopify_paid_current_revenue, row.shopify_paid_previous_revenue)),
+      google_ads_yoy: round(changeRate(row.google_ads_current_revenue, row.google_ads_previous_revenue)),
+    }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+
+  return {
+    previous_year: rangeMeta.previousYear,
+    current_year: rangeMeta.currentYear,
+    current_month: rangeMeta.currentMonth,
+    monthly,
+    totals: {
+      shopify_paid_previous_revenue: round(monthly.reduce((sum, row) => sum + row.shopify_paid_previous_revenue, 0)),
+      shopify_paid_current_revenue: round(monthly.reduce((sum, row) => sum + row.shopify_paid_current_revenue, 0)),
+      google_ads_previous_revenue: round(monthly.reduce((sum, row) => sum + row.google_ads_previous_revenue, 0)),
+      google_ads_current_revenue: round(monthly.reduce((sum, row) => sum + row.google_ads_current_revenue, 0)),
+      shopify_paid_previous_orders: monthly.reduce((sum, row) => sum + row.shopify_paid_previous_orders, 0),
+      shopify_paid_current_orders: monthly.reduce((sum, row) => sum + row.shopify_paid_current_orders, 0),
+      google_ads_previous_conversions: round(monthly.reduce((sum, row) => sum + row.google_ads_previous_conversions, 0)),
+      google_ads_current_conversions: round(monthly.reduce((sum, row) => sum + row.google_ads_current_conversions, 0)),
+    },
+  };
+}
+
 function finalizeAttributionOwners(map, totalOrders) {
   return Array.from(map.values())
     .map((row) => ({
@@ -1810,6 +1933,30 @@ function deriveOrderAttribution(row, couponMeta) {
     utm_source: utmSource,
     utm_campaign: utmCampaign,
   };
+}
+
+function isGoogleAdsPaidAttribution(row, snapshot) {
+  if (snapshot.channel !== "ads") return false;
+
+  const raw = row.raw && typeof row.raw === "object" ? row.raw : {};
+  const visit = raw.customerJourneySummary?.lastVisit || {};
+  const utm = visit.utmParameters || {};
+  const haystack = [
+    visit.source,
+    visit.sourceDescription,
+    visit.sourceType,
+    utm.source,
+    utm.medium,
+    utm.campaign,
+    row.source_name,
+    snapshot.utm_source,
+    snapshot.utm_campaign,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return /google|adwords|gads/.test(haystack);
 }
 
 function classifyAttribution(snapshot) {
@@ -1880,6 +2027,13 @@ function extractDomain(value) {
       .split("/")[0]
       .replace(/^www\./, "");
   }
+}
+
+function changeRate(current, previous) {
+  const curr = number(current);
+  const prev = number(previous);
+  if (!prev) return curr > 0 ? 100 : 0;
+  return ((curr - prev) / prev) * 100;
 }
 
 function buildGa4Funnel(rows) {
