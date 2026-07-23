@@ -3075,8 +3075,8 @@ async function runSearchConsoleSync(mode = "sync") {
   try {
     const suffix = mode === "test" ? "&mode=test" : "";
     const response = await fetch(`/api/sync/search-console?secret=${encodeURIComponent(state.integrationSecret)}${suffix}`);
-    const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data.error || "Search Console 同步失败");
+    const data = await readApiJson(response, "Search Console 同步失败");
+    if (!response.ok || !data.ok) throw new Error(describeApiError(data, "Search Console 同步失败"));
     await loadIntegrationConfigs();
     if (mode === "test") {
       showToast(`Search Console 连接测试通过：${data.site_url}`);
@@ -3097,7 +3097,7 @@ async function runGoogleAdsSync(mode = "sync") {
   try {
     const suffix = mode === "test" ? "&mode=test" : "";
     const response = await fetch(`/api/sync/google-ads?secret=${encodeURIComponent(state.integrationSecret)}${suffix}`);
-    const data = await response.json();
+    const data = await readApiJson(response, "Google Ads 同步失败");
     if (!response.ok || !data.ok) throw new Error(describeApiError(data, "Google Ads 同步失败"));
     await loadIntegrationConfigs();
     if (mode === "test") {
@@ -3119,8 +3119,8 @@ async function runMetaAdsSync(mode = "sync") {
   try {
     const suffix = mode === "test" ? "&mode=test" : "";
     const response = await fetch(`/api/sync/meta-ads?secret=${encodeURIComponent(state.integrationSecret)}${suffix}`);
-    const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data.error || "Meta Ads 同步失败");
+    const data = await readApiJson(response, "Meta Ads 同步失败");
+    if (!response.ok || !data.ok) throw new Error(describeApiError(data, "Meta Ads 同步失败"));
     await loadIntegrationConfigs();
     if (mode === "test") {
       showToast(`Meta Ads 连接测试通过：${data.account_name || data.ad_account_id}`);
@@ -3140,8 +3140,8 @@ async function syncCoupons() {
   showToast("正在同步优惠券分类...");
   try {
     const response = await fetch(`/api/sync/coupons?secret=${encodeURIComponent(state.integrationSecret)}`);
-    const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data.error || "同步失败");
+    const data = await readApiJson(response, "同步失败");
+    if (!response.ok || !data.ok) throw new Error(describeApiError(data, "同步失败"));
     state.couponsData = null;
     await loadCoupons();
     state.dashboardData = null;
@@ -3169,7 +3169,7 @@ async function seedDemoData() {
         shop_name: state.storeName || "boHealthy Demo Store",
       }),
     });
-    const data = await response.json();
+    const data = await readApiJson(response, "演示数据生成失败");
     if (!response.ok || !data.ok) {
       throw new Error(describeApiError(data, "演示数据生成失败"));
     }
@@ -3194,7 +3194,7 @@ async function clearDemoData() {
       },
       body: JSON.stringify({ action: "clear" }),
     });
-    const data = await response.json();
+    const data = await readApiJson(response, "演示数据清空失败");
     if (!response.ok || !data.ok) {
       throw new Error(describeApiError(data, "演示数据清空失败"));
     }
@@ -3452,7 +3452,7 @@ async function loadCoupons() {
   try {
     const response = await fetch("/api/coupons");
     if (!response.ok) return;
-    const data = await response.json();
+    const data = await readApiJson(response, "加载优惠券失败");
     if (!data.ok) return;
     state.couponsData = data.coupons || [];
     updateCouponResults();
@@ -3497,7 +3497,7 @@ async function hydrateDashboardData() {
   try {
     const response = await fetch(`/api/dashboard/shopify${rangeQuery ? `?${rangeQuery}` : ""}`);
     if (!response.ok) return;
-    const data = await response.json();
+    const data = await readApiJson(response, "加载看板失败");
     if (!data.ok) return;
     if (requestId !== state.dashboardRequestId) return;
     const latestKey = buildDashboardRangeQuery() || "default";
