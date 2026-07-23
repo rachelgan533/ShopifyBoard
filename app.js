@@ -120,6 +120,7 @@ const state = {
   couponFilter: "all",
   dashboardData: null,
   dashboardDataKey: "",
+  dashboardRequestId: 0,
   couponsData: null,
   integrationSecret: "",
   simulator: null,
@@ -2567,6 +2568,7 @@ function applyCustomRange() {
 function invalidateDashboardData() {
   state.dashboardData = null;
   state.dashboardDataKey = "";
+  state.dashboardRequestId += 1;
 }
 
 async function handleAction(action, button) {
@@ -2962,7 +2964,7 @@ async function runGa4Sync(mode = "sync") {
   try {
     const suffix = mode === "test" ? "&mode=test" : "";
     const response = await fetch(`/api/sync/ga4?secret=${encodeURIComponent(state.integrationSecret)}${suffix}`);
-    const data = await response.json();
+    const data = await readApiJson(response, "GA4 同步失败");
     if (!response.ok || !data.ok) throw new Error(describeApiError(data, "GA4 同步失败"));
     await loadIntegrationConfigs();
     if (mode === "test") {
@@ -3388,6 +3390,7 @@ function showToast(message) {
 async function hydrateDashboardData() {
   const rangeQuery = buildDashboardRangeQuery();
   const requestKey = rangeQuery || "default";
+  const requestId = ++state.dashboardRequestId;
 
   if (state.dashboardData && state.dashboardDataKey === requestKey) {
     applyDashboardData(state.dashboardData);
@@ -3399,6 +3402,9 @@ async function hydrateDashboardData() {
     if (!response.ok) return;
     const data = await response.json();
     if (!data.ok) return;
+    if (requestId !== state.dashboardRequestId) return;
+    const latestKey = buildDashboardRangeQuery() || "default";
+    if (latestKey !== requestKey) return;
     state.dashboardData = data;
     state.dashboardDataKey = requestKey;
     applyDashboardData(data);
