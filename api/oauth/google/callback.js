@@ -23,13 +23,15 @@ module.exports = async function handler(req, res) {
     const code = String(req.query?.code || "").trim();
     const state = String(req.query?.state || "").trim();
     const oauthError = String(req.query?.error || "").trim();
+    const oauthErrorDescription = String(req.query?.error_description || "").trim();
     const baseUrl = getBaseUrl(req);
 
     if (oauthError) {
+      const payload = safeReadState(state);
       return redirect(res, buildRedirectUrl(baseUrl, {
         oauth_status: "error",
-        oauth_source: "ga4",
-        oauth_message: oauthError,
+        oauth_source: payload?.source || "ga4",
+        oauth_message: oauthErrorDescription || oauthError,
       }));
     }
 
@@ -298,6 +300,18 @@ function describeGoogleOauthCallbackError(details) {
   if (combined.includes("developer token")) {
     return "Google Ads Developer Token 无效、未获批，或当前账号不可用";
   }
+  if (combined.includes("redirect_uri_mismatch")) {
+    return "Google OAuth 回调地址不匹配：请在 Google Cloud OAuth 客户端里加入当前站点的 /api/oauth/google/callback";
+  }
+  if (combined.includes("invalid_client")) {
+    return "Google OAuth Client ID 或 Client Secret 无效，请检查 Vercel 环境变量和 Google Cloud OAuth 客户端配置";
+  }
+  if (combined.includes("unauthorized_client")) {
+    return "当前 Google OAuth 客户端未被允许发起此授权，请检查 OAuth 客户端类型、测试用户和回调地址配置";
+  }
+  if (combined.includes("access_denied")) {
+    return "Google 授权被拒绝：可能是你取消了授权，或当前账号未被加入 OAuth 测试用户";
+  }
   if (combined.includes("login-customer-id")) {
     return "Login Customer ID 不正确，请检查 MCC 经理账号";
   }
@@ -324,6 +338,14 @@ function describeGoogleOauthCallbackError(details) {
   }
 
   return topLevelMessage || nested[0] || "";
+}
+
+function safeReadState(rawState) {
+  try {
+    return verifySignedState(rawState);
+  } catch {
+    return null;
+  }
 }
 
 function offsetDateString(daysAgo) {
