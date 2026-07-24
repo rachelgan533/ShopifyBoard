@@ -386,6 +386,9 @@ function describeGoogleOauthCallbackError(details) {
   if (combined.includes("property") && (combined.includes("not found") || combined.includes("invalid") || combined.includes("does not exist"))) {
     return "GA4 Property ID 无效：请填写媒体资源 ID，不是账号 ID";
   }
+  if (combined.includes("googleads.googleapis.com") && (combined.includes("has not been used") || combined.includes("disabled"))) {
+    return "Google Ads API 还没有在当前 Google Cloud 项目中启用：请打开报错里的 console.developers.google.com 链接，启用 Google Ads API，等待几分钟后再重试";
+  }
   if (combined.includes("analyticsdata.googleapis.com") || combined.includes("has not been used") || combined.includes("disabled")) {
     return "Google Analytics Data API 未启用：请在 Google Cloud 项目中启用该 API 后重试";
   }
