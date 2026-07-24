@@ -175,9 +175,9 @@ async function fetchGoogleUserInfo(accessToken) {
 
 async function getIntegration(source) {
   const rows = await supabaseFetch(
-    `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}&select=id,source,status,config,last_connected_at,last_tested_at,last_synced_at,shop_id&limit=1`,
+    `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}&select=id,source,status,config,last_connected_at,last_tested_at,last_synced_at,shop_id,updated_at&order=updated_at.desc&limit=20`,
   );
-  return rows[0] || null;
+  return latestIntegration(rows);
 }
 
 async function touchIntegration(source, patch) {
@@ -258,4 +258,14 @@ function base64UrlDecode(value) {
 
 function trimSlash(value) {
   return String(value || "").replace(/\/$/, "");
+}
+
+function latestIntegration(rows) {
+  return [...(rows || [])].sort((a, b) => integrationTimestamp(b) - integrationTimestamp(a))[0] || null;
+}
+
+function integrationTimestamp(row) {
+  return (
+    Date.parse(row?.updated_at || row?.last_synced_at || row?.last_connected_at || row?.last_tested_at || 0) || 0
+  );
 }

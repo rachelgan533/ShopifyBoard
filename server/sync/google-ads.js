@@ -283,17 +283,19 @@ async function resolveShopId(config) {
 }
 
 async function getIntegrationConfig(source) {
+  const row = await getIntegration(source);
+  return row?.config || {};
+}
+
+async function getIntegration(source) {
   const rows = await supabaseFetch(
-    `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}&select=id,shop_id,config,status,last_connected_at,last_tested_at,last_synced_at&limit=1`,
+    `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}&select=id,shop_id,config,status,last_connected_at,last_tested_at,last_synced_at,updated_at&order=updated_at.desc&limit=20`,
   );
-  return rows[0]?.config || {};
+  return latestIntegration(rows);
 }
 
 async function touchIntegration(source, patch) {
-  const current = await supabaseFetch(
-    `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}&select=id,config,status,last_connected_at,last_tested_at,last_synced_at&limit=1`,
-  );
-  const row = current[0] || {};
+  const row = (await getIntegration(source)) || {};
   const mergedConfig = {
     ...(row.config || {}),
     ...(patch.config || {}),
@@ -321,6 +323,16 @@ async function touchIntegration(source, patch) {
     headers: { prefer: "return=minimal" },
     body: JSON.stringify([payload]),
   });
+}
+
+function latestIntegration(rows) {
+  return [...(rows || [])].sort((a, b) => integrationTimestamp(b) - integrationTimestamp(a))[0] || null;
+}
+
+function integrationTimestamp(row) {
+  return (
+    Date.parse(row?.updated_at || row?.last_synced_at || row?.last_connected_at || row?.last_tested_at || 0) || 0
+  );
 }
 
 async function upsertSyncState(shopId, patch) {
