@@ -255,10 +255,12 @@ function redactConfig(config) {
 
 async function getShopifySyncOverview(shopId) {
   const encodedShopId = encodeURIComponent(shopId);
-  const [firstOrderRows, lastOrderRows, orderCount, syncRows] = await Promise.all([
+  const [firstOrderRows, lastOrderRows, orderCount, customerCount, lineItemCount, syncRows] = await Promise.all([
     supabaseFetch(`/rest/v1/orders?shop_id=eq.${encodedShopId}&select=created_at&order=created_at.asc&limit=1`),
     supabaseFetch(`/rest/v1/orders?shop_id=eq.${encodedShopId}&select=created_at&order=created_at.desc&limit=1`),
     supabaseCount(`/rest/v1/orders?shop_id=eq.${encodedShopId}&select=id`),
+    supabaseCount(`/rest/v1/customers?shop_id=eq.${encodedShopId}&select=id`),
+    supabaseCount(`/rest/v1/order_line_items?shop_id=eq.${encodedShopId}&select=id`),
     supabaseFetch(
       `/rest/v1/sync_state?shop_id=eq.${encodedShopId}&source=eq.shopify&resource=eq.orders&select=last_synced_at,status,cursor,updated_at&limit=1`,
     ),
@@ -267,6 +269,8 @@ async function getShopifySyncOverview(shopId) {
   const sync = syncRows[0] || null;
   return {
     order_count: orderCount,
+    customer_count: customerCount,
+    line_item_count: lineItemCount,
     first_order_at: firstOrderRows[0]?.created_at || null,
     last_order_at: lastOrderRows[0]?.created_at || null,
     checkpoint_at: sync?.last_synced_at || null,

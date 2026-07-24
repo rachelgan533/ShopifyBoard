@@ -2353,10 +2353,18 @@ function integrationPage() {
               </div>
               ${
                 source === "shopify"
-                  ? `<div class="grid cols-2" style="margin-bottom:14px">
+                  ? `<div class="grid cols-4" style="margin-bottom:14px">
                       <div class="card pad">
                         <div class="muted">Synced Orders · 已同步订单数</div>
                         <div class="metric-label" data-integration-field="synced_order_count">0</div>
+                      </div>
+                      <div class="card pad">
+                        <div class="muted">Synced Customers · 已同步客户数</div>
+                        <div class="metric-label" data-integration-field="synced_customer_count">0</div>
+                      </div>
+                      <div class="card pad">
+                        <div class="muted">Synced Line Items · 已同步明细数</div>
+                        <div class="metric-label" data-integration-field="synced_line_item_count">0</div>
                       </div>
                       <div class="card pad">
                         <div class="muted">Order Range · 已同步订单时间范围</div>
@@ -3375,6 +3383,8 @@ async function loadIntegrationConfigs() {
         if (shopName) updateStoreIdentity(shopName);
         const syncOverview = item.meta?.sync_overview || {};
         updateIntegrationField(card, "synced_order_count", formatInteger(syncOverview.order_count || 0));
+        updateIntegrationField(card, "synced_customer_count", formatInteger(syncOverview.customer_count || 0));
+        updateIntegrationField(card, "synced_line_item_count", formatInteger(syncOverview.line_item_count || 0));
         updateIntegrationField(card, "synced_order_range", formatOrderRange(syncOverview.first_order_at, syncOverview.last_order_at));
       }
     }
