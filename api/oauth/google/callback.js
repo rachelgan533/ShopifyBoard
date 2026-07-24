@@ -110,12 +110,32 @@ module.exports = async function handler(req, res) {
         }));
       }
 
-      const accountProfile = await queryGoogleAdsCustomer({
-        accessToken,
-        developerToken,
-        customerId,
-        loginCustomerId,
-      });
+      let accountProfile;
+      try {
+        accountProfile = await queryGoogleAdsCustomer({
+          accessToken,
+          developerToken,
+          customerId,
+          loginCustomerId,
+        });
+      } catch (error) {
+        const diagnosis = await diagnoseGoogleAdsValidationError({
+          accessToken,
+          developerToken,
+          customerId,
+          loginCustomerId,
+          originalError: error,
+        });
+        return redirect(res, buildRedirectUrl(baseUrl, {
+          oauth_status: "error",
+          oauth_source: "google_ads",
+          oauth_message:
+            diagnosis ||
+            describeGoogleOauthCallbackError(error.details) ||
+            error.message ||
+            "Google Ads 账号校验失败",
+        }));
+      }
 
       await touchIntegration("google_ads", {
         status: "connected",
@@ -257,6 +277,28 @@ async function queryGoogleAdsCustomer({ accessToken, developerToken, customerId,
   const firstBatch = Array.isArray(payload) ? payload[0] : payload;
   const firstResult = firstBatch?.results?.[0];
   return firstResult || {};
+}
+
+async function diagnoseGoogleAdsValidationError({ accessToken, developerToken, customerId, loginCustomerId, originalError }) {
+  const primary = describeGoogleOauthCallbackError(originalError?.details);
+  if (!loginCustomerId) return primary;
+
+  try {
+    await queryGoogleAdsCustomer({
+      accessToken,
+      developerToken,
+      customerId,
+      loginCustomerId: "",
+    });
+    return `Login Customer ID ${loginCustomerId} 可能填错了：去掉 MCC 后可以访问该广告账户。请留空重试，或改成实际发起访问的经理账号 ID（无横杠）`;
+  } catch (retryError) {
+    const retryDiagnosis = describeGoogleOauthCallbackError(retryError?.details);
+    if (retryDiagnosis && retryDiagnosis !== primary) {
+      return `${primary || "Google Ads 账号校验失败"}；补充诊断：${retryDiagnosis}`;
+    }
+  }
+
+  return primary;
 }
 
 async function querySearchConsole(siteUrl, accessToken, body) {
