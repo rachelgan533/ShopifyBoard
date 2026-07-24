@@ -356,7 +356,19 @@ async function getShopifyAccessToken(shopDomain, config = {}) {
   }
 
   if (clientId && clientSecret) {
-    return getShopifyClientCredentialsToken(shopDomain, clientId, clientSecret);
+    try {
+      return await getShopifyClientCredentialsToken(shopDomain, clientId, clientSecret);
+    } catch (error) {
+      if (adminToken && adminToken.trim()) {
+        return adminToken.trim();
+      }
+
+      error.details = {
+        ...(error.details || {}),
+        fallback: "当前没有可用的 SHOPIFY_ADMIN_ACCESS_TOKEN 可回退",
+      };
+      throw error;
+    }
   }
 
   if (adminToken) {
