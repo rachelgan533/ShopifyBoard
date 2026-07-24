@@ -323,17 +323,12 @@ async function syncShopifyOrders(mode = "sync", options = {}) {
 }
 
 async function getIntegrationConfig(source) {
-  const rows = await supabaseFetch(
-    `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}&select=config&limit=1`,
-  );
-  return rows[0]?.config || {};
+  const row = await getIntegrationRow(source);
+  return row?.config || {};
 }
 
 async function touchIntegration(source, patch) {
-  const rows = await supabaseFetch(
-    `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}&select=id,config,status,last_connected_at,last_tested_at,last_synced_at&limit=1`,
-  );
-  const current = rows[0];
+  const current = await getIntegrationRow(source);
   if (!current?.id) return;
 
   await supabaseFetch(`/rest/v1/data_integrations?id=eq.${current.id}`, {
@@ -350,6 +345,24 @@ async function touchIntegration(source, patch) {
       last_synced_at: patch.last_synced_at ?? current.last_synced_at ?? null,
     }),
   });
+}
+
+async function getIntegrationRow(source) {
+  const rows = await supabaseFetch(
+    `/rest/v1/data_integrations?source=eq.${encodeURIComponent(source)}&select=id,shop_id,config,status,last_connected_at,last_tested_at,last_synced_at,updated_at&order=updated_at.desc&limit=20`,
+  );
+  return latestIntegration(rows);
+}
+
+function latestIntegration(rows) {
+  return [...(rows || [])]
+    .sort((a, b) => integrationTimestamp(b) - integrationTimestamp(a))[0] || null;
+}
+
+function integrationTimestamp(row) {
+  return (
+    Date.parse(row?.updated_at || row?.last_synced_at || row?.last_connected_at || row?.last_tested_at || 0) || 0
+  );
 }
 
 async function getShopifyAccessToken(shopDomain, config = {}) {
