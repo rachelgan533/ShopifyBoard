@@ -450,6 +450,7 @@ async function getShopifyClientCredentialsToken(shopDomain, clientId, clientSecr
     const error = new Error("Failed to get Shopify access token");
     error.details = {
       ...body,
+      status: response.status,
       request_id: requestId,
       fix: describeShopifyAccessTokenFailure(body, {
         shopDomain,

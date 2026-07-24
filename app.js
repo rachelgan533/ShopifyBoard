@@ -3234,6 +3234,20 @@ function describeApiError(data, fallback) {
   if (!details) return base;
 
   if (typeof details === "string") return `${base}：${details}`;
+  if (
+    /Failed to get Shopify access token/i.test(base) &&
+    (details.error || details.error_description || details.raw || details.request_id || details.status)
+  ) {
+    const reasons = [
+      details.error,
+      details.error_description,
+      details.raw,
+      details.status ? `HTTP ${details.status}` : "",
+      details.request_id ? `request id: ${details.request_id}` : "",
+    ].filter(Boolean);
+    const fixText = Array.isArray(details.fix) ? details.fix.join("；") : details.fix;
+    return `${base}：${reasons.join(" / ")}${fixText ? `；${fixText}` : ""}`;
+  }
   if (details.message) return `${base}：${details.message}`;
   if (Array.isArray(details.shopify_errors)) {
     const messages = details.shopify_errors
