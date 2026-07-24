@@ -211,7 +211,8 @@ async function syncShopifyOrders(mode = "sync", options = {}) {
   const maxPages = fullSync
     ? Number(process.env.SHOPIFY_SYNC_FULL_MAX_PAGES || 200)
     : defaultMaxPages;
-  const accessToken = await getShopifyAccessToken(shopDomain, config);
+  const authInfo = await getShopifyAccessToken(shopDomain, config);
+  const accessToken = authInfo.accessToken;
 
   const shop = await ensureShop(shopDomain, accessToken);
   const syncState = await getSyncState(shop.id);
@@ -226,6 +227,7 @@ async function syncShopifyOrders(mode = "sync", options = {}) {
       status: "connected",
       last_connected_at: now,
       last_tested_at: now,
+      config: buildShopifyAuthConfigPatch(authInfo),
     });
     return {
       ok: true,
@@ -233,6 +235,8 @@ async function syncShopifyOrders(mode = "sync", options = {}) {
       shop_id: shop.id,
       mode: "test",
       tested_at: now,
+      auth_method: authInfo.authMethod,
+      auth_label: authInfo.authLabel,
     };
   }
 
@@ -312,6 +316,7 @@ async function syncShopifyOrders(mode = "sync", options = {}) {
     last_connected_at: new Date().toISOString(),
     last_tested_at: new Date().toISOString(),
     last_synced_at: latestUpdatedAt,
+    config: buildShopifyAuthConfigPatch(authInfo),
   });
 
   return result;
@@ -336,7 +341,10 @@ async function touchIntegration(source, patch) {
     headers: { prefer: "return=minimal" },
     body: JSON.stringify({
       status: patch.status || current.status || "connected",
-      config: current.config || {},
+      config: {
+        ...(current.config || {}),
+        ...(patch.config || {}),
+      },
       last_connected_at: patch.last_connected_at ?? current.last_connected_at ?? null,
       last_tested_at: patch.last_tested_at ?? current.last_tested_at ?? null,
       last_synced_at: patch.last_synced_at ?? current.last_synced_at ?? null,
@@ -357,10 +365,20 @@ async function getShopifyAccessToken(shopDomain, config = {}) {
 
   if (clientId && clientSecret) {
     try {
-      return await getShopifyClientCredentialsToken(shopDomain, clientId, clientSecret);
+      const accessToken = await getShopifyClientCredentialsToken(shopDomain, clientId, clientSecret);
+      return {
+        accessToken,
+        authMethod: "client_credentials",
+        authLabel: "Client Credentials",
+      };
     } catch (error) {
       if (adminToken && adminToken.trim()) {
-        return adminToken.trim();
+        return {
+          accessToken: adminToken.trim(),
+          authMethod: "admin_access_token",
+          authLabel: "Admin Access Token",
+          authNote: "Client Credentials 失败后自动回退",
+        };
       }
 
       error.details = {
@@ -372,7 +390,11 @@ async function getShopifyAccessToken(shopDomain, config = {}) {
   }
 
   if (adminToken) {
-    return adminToken.trim();
+    return {
+      accessToken: adminToken.trim(),
+      authMethod: "admin_access_token",
+      authLabel: "Admin Access Token",
+    };
   }
 
   const error = new Error("Missing Shopify credentials");
@@ -380,6 +402,15 @@ async function getShopifyAccessToken(shopDomain, config = {}) {
     fix: "Fill Client ID and Client Secret in Settings -> Integration, or set SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET in Vercel.",
   };
   throw error;
+}
+
+function buildShopifyAuthConfigPatch(authInfo = {}) {
+  return {
+    last_auth_method: String(authInfo.authMethod || "").trim(),
+    last_auth_label: String(authInfo.authLabel || "").trim(),
+    last_auth_note: String(authInfo.authNote || "").trim(),
+    last_auth_at: new Date().toISOString(),
+  };
 }
 
 async function getShopifyClientCredentialsToken(shopDomain, clientId, clientSecret) {

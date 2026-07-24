@@ -20,7 +20,13 @@ module.exports = async function handler(req, res) {
         ok: true,
         integrations: visibleRows.map((row) => ({
           ...row,
-          meta: row.source === "shopify" ? { sync_overview: shopifySyncOverview } : undefined,
+          meta:
+            row.source === "shopify"
+              ? {
+                  sync_overview: shopifySyncOverview,
+                  auth_overview: buildShopifyAuthOverview(row.config || {}),
+                }
+              : undefined,
           config: redactConfig(row.config || {}),
         })),
         primary_shop: shops[0] || null,
@@ -251,6 +257,23 @@ function redactConfig(config) {
     }
   }
   return redacted;
+}
+
+function buildShopifyAuthOverview(config) {
+  const hasSavedAdminToken = Boolean(String(config?.admin_access_token || "").trim());
+  const hasEnvAdminToken = Boolean(String(process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || "").trim());
+  const hasClientCredentials = Boolean(
+    String(config?.client_id || "").trim() && String(config?.client_secret || "").trim(),
+  );
+
+  return {
+    last_auth_method: String(config?.last_auth_method || "").trim(),
+    last_auth_label: String(config?.last_auth_label || "").trim(),
+    last_auth_note: String(config?.last_auth_note || "").trim(),
+    last_auth_at: config?.last_auth_at || null,
+    has_client_credentials: hasClientCredentials,
+    has_admin_token: hasSavedAdminToken || hasEnvAdminToken,
+  };
 }
 
 async function getShopifySyncOverview(shopId) {

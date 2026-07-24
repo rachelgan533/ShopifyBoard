@@ -2333,7 +2333,7 @@ function integrationPage() {
                 <span class="status ${status === "未连接" ? "gray" : ""}" data-integration-status>${status}</span>
               </div>
               <div class="placeholder-line"></div>
-              <div class="grid cols-4" style="margin-bottom:14px">
+              <div class="grid ${source === "shopify" ? "cols-5" : "cols-4"}" style="margin-bottom:14px">
                 <div class="card pad">
                   <div class="muted">Connection Status · 连接状态</div>
                   <div class="metric-label" data-integration-field="status_text">未连接</div>
@@ -2350,6 +2350,14 @@ function integrationPage() {
                   <div class="muted">Last Sync Time · 最近同步</div>
                   <div class="metric-label" data-integration-field="last_synced_at">—</div>
                 </div>
+                ${
+                  source === "shopify"
+                    ? `<div class="card pad">
+                        <div class="muted">Auth Method · 当前鉴权方式</div>
+                        <div class="metric-label" data-integration-field="auth_method">未记录</div>
+                      </div>`
+                    : ""
+                }
               </div>
               ${
                 source === "shopify"
@@ -3382,10 +3390,12 @@ async function loadIntegrationConfigs() {
         const shopName = item.config?.shop_name || data.primary_shop?.shop_name;
         if (shopName) updateStoreIdentity(shopName);
         const syncOverview = item.meta?.sync_overview || {};
+        const authOverview = item.meta?.auth_overview || {};
         updateIntegrationField(card, "synced_order_count", formatInteger(syncOverview.order_count || 0));
         updateIntegrationField(card, "synced_customer_count", formatInteger(syncOverview.customer_count || 0));
         updateIntegrationField(card, "synced_line_item_count", formatInteger(syncOverview.line_item_count || 0));
         updateIntegrationField(card, "synced_order_range", formatOrderRange(syncOverview.first_order_at, syncOverview.last_order_at));
+        updateIntegrationField(card, "auth_method", describeShopifyAuthMethod(authOverview));
       }
     }
 
@@ -3427,6 +3437,23 @@ function updateStoreIdentity(name) {
 function updateIntegrationField(card, key, value) {
   const node = card.querySelector(`[data-integration-field="${key}"]`);
   if (node) node.textContent = value;
+}
+
+function describeShopifyAuthMethod(authOverview = {}) {
+  const label = String(authOverview?.last_auth_label || "").trim();
+  const note = String(authOverview?.last_auth_note || "").trim();
+  if (label) return note ? `${label} · ${note}` : label;
+
+  if (authOverview?.has_client_credentials && authOverview?.has_admin_token) {
+    return "待验证 · 优先 Client Credentials，失败时回退 Admin Access Token";
+  }
+  if (authOverview?.has_client_credentials) {
+    return "待验证 · Client Credentials";
+  }
+  if (authOverview?.has_admin_token) {
+    return "待验证 · Admin Access Token";
+  }
+  return "未配置";
 }
 
 function integrationStatusLabel(status) {
