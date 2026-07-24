@@ -295,10 +295,15 @@ function describeGoogleOauthCallbackError(details) {
     .flatMap((detail) => detail?.errors || [])
     .flatMap((item) => Object.values(item?.errorCode || {}))
     .filter(Boolean);
+  const nestedMessage = nested[0] || "";
+  const codeMessage = codes[0] || "";
   const combined = [topLevelMessage, ...nested, ...codes].join(" | ").toLowerCase();
 
   if (combined.includes("developer token")) {
     return "Google Ads Developer Token 无效、未获批，或当前账号不可用";
+  }
+  if (combined.includes("test account")) {
+    return "当前 Google Ads Developer Token 还只能访问测试账号，不能访问真实广告账户";
   }
   if (combined.includes("redirect_uri_mismatch")) {
     return "Google OAuth 回调地址不匹配：请在 Google Cloud OAuth 客户端里加入当前站点的 /api/oauth/google/callback";
@@ -315,6 +320,12 @@ function describeGoogleOauthCallbackError(details) {
   if (combined.includes("login-customer-id")) {
     return "Login Customer ID 不正确，请检查 MCC 经理账号";
   }
+  if (combined.includes("user_permission_denied") || combined.includes("authorizationerror.user_permission_denied")) {
+    return "当前 Google 账号没有访问该 Google Ads 账户；如果你是通过 MCC 授权，请填写 Login Customer ID（经理账号 ID，无横杠）";
+  }
+  if (combined.includes("customer_not_enabled") || combined.includes("customer not found")) {
+    return "Google Ads Customer ID 不可用，请确认账号已启用且填写正确";
+  }
   if (combined.includes("permission_denied") || combined.includes("does not have sufficient permissions")) {
     return "GA4 权限不足：请确认当前 Google 账号有该 GA4 媒体资源的查看者或管理员权限";
   }
@@ -324,12 +335,6 @@ function describeGoogleOauthCallbackError(details) {
   if (combined.includes("analyticsdata.googleapis.com") || combined.includes("has not been used") || combined.includes("disabled")) {
     return "Google Analytics Data API 未启用：请在 Google Cloud 项目中启用该 API 后重试";
   }
-  if (combined.includes("user_permission_denied") || combined.includes("permission")) {
-    return "当前 Google 账号没有访问该 Google Ads 账户的权限";
-  }
-  if (combined.includes("customer_not_enabled") || combined.includes("customer not found")) {
-    return "Google Ads Customer ID 不可用，请确认账号已启用且填写正确";
-  }
   if (combined.includes("ga4 runreport failed")) {
     return "GA4 runReport 失败，请确认 Property ID 正确且当前账号有该媒体资源权限";
   }
@@ -337,7 +342,11 @@ function describeGoogleOauthCallbackError(details) {
     return "Search Console 查询失败，请确认 Site URL 正确且当前 Google 账号有该资源权限";
   }
 
-  return topLevelMessage || nested[0] || "";
+  if (combined.includes("google ads account validation failed")) {
+    return nestedMessage || codeMessage || "Google Ads 账号校验失败，请检查 Customer ID、Developer Token、账号权限，以及是否需要填写 Login Customer ID（MCC）";
+  }
+
+  return nestedMessage || codeMessage || topLevelMessage || "";
 }
 
 function safeReadState(rawState) {
