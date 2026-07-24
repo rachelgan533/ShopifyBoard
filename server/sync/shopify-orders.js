@@ -166,7 +166,9 @@ module.exports = async function handler(req, res) {
     assertEnv();
 
     const mode = req.query?.mode === "test" ? "test" : "sync";
-    const syncResult = await syncShopifyOrders(mode);
+    const syncResult = await syncShopifyOrders(mode, {
+      fullSync: req.query?.full === "1",
+    });
     return res.status(200).json(syncResult);
   } catch (error) {
     return res.status(error.statusCode || 500).json({
@@ -200,11 +202,15 @@ function assertEnv() {
   }
 }
 
-async function syncShopifyOrders(mode = "sync") {
+async function syncShopifyOrders(mode = "sync", options = {}) {
   const config = await getIntegrationConfig("shopify");
   const shopDomain = normalizeShopDomain(config.shop_domain || process.env.SHOPIFY_SHOP_DOMAIN);
   const first = Number(process.env.SHOPIFY_SYNC_PAGE_SIZE || 50);
-  const maxPages = Number(process.env.SHOPIFY_SYNC_MAX_PAGES || 4);
+  const defaultMaxPages = Number(process.env.SHOPIFY_SYNC_MAX_PAGES || 4);
+  const fullSync = mode === "sync" && options.fullSync === true;
+  const maxPages = fullSync
+    ? Number(process.env.SHOPIFY_SYNC_FULL_MAX_PAGES || 200)
+    : defaultMaxPages;
   const accessToken = await getShopifyAccessToken(shopDomain, config);
 
   const shop = await ensureShop(shopDomain, accessToken);
@@ -233,9 +239,11 @@ async function syncShopifyOrders(mode = "sync") {
   let cursor = syncState?.cursor || null;
   let pages = 0;
   let importedOrders = 0;
+  let importedCustomers = 0;
   let importedLineItems = 0;
   let lastCursor = syncState?.cursor || null;
   let latestUpdatedAt = updatedAfter;
+  let hasNextPage = false;
 
   while (pages < maxPages) {
     const response = await shopifyGraphql(shopDomain, accessToken, SHOPIFY_ORDER_QUERY, {
@@ -263,20 +271,22 @@ async function syncShopifyOrders(mode = "sync") {
     await upsertBatch("order_line_items", mapped.lineItems, "id");
 
     importedOrders += mapped.orders.length;
+    importedCustomers += mapped.customers.length;
     importedLineItems += mapped.lineItems.length;
     latestUpdatedAt = newestIso(latestUpdatedAt, orders.map((order) => order.updatedAt));
 
     pages += 1;
     cursor = ordersConnection.pageInfo.endCursor;
-    lastCursor = cursor;
+    hasNextPage = Boolean(ordersConnection.pageInfo.hasNextPage);
+    lastCursor = hasNextPage ? cursor : null;
 
     await upsertSyncState(shop.id, {
       last_synced_at: latestUpdatedAt,
       cursor: lastCursor,
-      status: ordersConnection.pageInfo.hasNextPage ? "running" : "idle",
+      status: hasNextPage ? "running" : "idle",
     });
 
-    if (!ordersConnection.pageInfo.hasNextPage) break;
+    if (!hasNextPage) break;
   }
 
   const result = {
@@ -287,10 +297,14 @@ async function syncShopifyOrders(mode = "sync") {
     latest_updated_at: latestUpdatedAt,
     pages,
     imported_orders: importedOrders,
+    imported_customers: importedCustomers,
     imported_line_items: importedLineItems,
-    has_more: Boolean(lastCursor && pages >= maxPages),
+    has_more: Boolean(hasNextPage && pages >= maxPages),
     next_cursor: lastCursor,
     resumed_from_cursor: Boolean(syncState?.cursor),
+    full_sync: fullSync,
+    page_size: first,
+    page_limit: maxPages,
   };
 
   await touchIntegration("shopify", {

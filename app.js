@@ -3019,9 +3019,9 @@ async function startGoogleOAuth(button) {
 async function runShopifySync(mode = "sync") {
   if (!state.integrationSecret) return showToast("请先填写管理密钥 CRON_SECRET。");
 
-  showToast(mode === "test" ? "正在测试 Shopify 连接..." : "正在触发 Shopify 同步...");
+  showToast(mode === "test" ? "正在测试 Shopify 连接..." : "正在一次性同步 Shopify 订单和客户...");
   try {
-    const suffix = mode === "test" ? "&mode=test" : "";
+    const suffix = mode === "test" ? "&mode=test" : "&full=1";
     const response = await fetch(`/api/sync/shopify-orders?secret=${encodeURIComponent(state.integrationSecret)}${suffix}`);
     const data = await readApiJson(response, "同步失败");
     if (!response.ok || !data.ok) throw new Error(describeApiError(data, "同步失败"));
@@ -3033,14 +3033,14 @@ async function runShopifySync(mode = "sync") {
     state.dashboardData = null;
     await hydrateDashboardData();
     if (data.has_more) {
-      showToast(`Shopify 已同步 ${data.imported_orders} 单，仍有更多历史数据。继续点“手动同步”直到不再提示还有更多数据。`);
+      showToast(`Shopify 已同步订单 ${data.imported_orders}、客户 ${data.imported_customers || 0}，但历史数据仍超出单次安全上限。再点一次“手动同步”继续即可。`);
       return;
     }
     if (!Number(data.imported_orders || 0)) {
       showToast(`Shopify 同步完成，但从 ${String(data.updated_after || "").slice(0, 10) || "当前起点"} 开始没有找到可导入订单。`);
       return;
     }
-    showToast(`Shopify 同步完成：订单 ${data.imported_orders}，明细 ${data.imported_line_items}`);
+    showToast(`Shopify 同步完成：订单 ${data.imported_orders}，客户 ${data.imported_customers || 0}，明细 ${data.imported_line_items}`);
   } catch (error) {
     showToast(`同步失败：${error.message}`);
   }
