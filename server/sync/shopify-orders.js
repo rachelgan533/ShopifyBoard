@@ -382,14 +382,74 @@ async function getShopifyClientCredentialsToken(shopDomain, clientId, clientSecr
     }).toString(),
   });
 
-  const body = await response.json().catch(() => ({}));
+  const requestId = response.headers.get("x-request-id") || "";
+  const text = await response.text();
+  let body = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    body = text ? { raw: text } : {};
+  }
   if (!response.ok || !body.access_token) {
     const error = new Error("Failed to get Shopify access token");
-    error.details = body;
+    error.details = {
+      ...body,
+      request_id: requestId,
+      fix: describeShopifyAccessTokenFailure(body, {
+        shopDomain,
+      }),
+    };
     throw error;
   }
 
   return body.access_token;
+}
+
+function describeShopifyAccessTokenFailure(details, context = {}) {
+  const combined = [
+    details?.error,
+    details?.error_description,
+    details?.message,
+    details?.raw,
+  ]
+    .filter(Boolean)
+    .join(" | ")
+    .toLowerCase();
+
+  if (combined.includes("application_cannot_be_found")) {
+    return [
+      `请确认当前店铺 ${context.shopDomain || ""} 安装的就是这组 Client ID / Client Secret 对应的 Shopify app`,
+      "去 Shopify Dev Dashboard 重新复制一次 Client ID 和 Client Secret",
+      "确认这个 app 已在当前店铺安装，而不是装在别的店铺",
+    ];
+  }
+
+  if (combined.includes("invalid_client") || combined.includes("invalid client")) {
+    return [
+      "Client ID 或 Client Secret 无效，请去 Shopify Dev Dashboard 重新复制后保存",
+      "如果你刚轮换过 secret，需要把新 secret 更新到这里",
+    ];
+  }
+
+  if (combined.includes("unauthorized_client")) {
+    return [
+      "这个 app 当前不能对该店铺使用 client_credentials",
+      "确认 app 属于你自己的组织，并且安装在你自己拥有的店铺上",
+    ];
+  }
+
+  if (combined.includes("forbidden") || combined.includes("access denied")) {
+    return [
+      "Shopify 拒绝了这次 token 请求",
+      "确认 app 已发布当前版本，并且当前店铺已重新安装或更新授权",
+    ];
+  }
+
+  return [
+    "请确认 Shopify app 已在当前店铺安装",
+    "确认 Shopify Dev Dashboard 中当前版本已发布，并且 scopes 正确",
+    "重新复制 Client ID 和 Client Secret 后保存，再重试",
+  ];
 }
 
 async function ensureShop(shopDomain, accessToken) {
