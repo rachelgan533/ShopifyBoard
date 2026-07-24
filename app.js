@@ -2248,6 +2248,7 @@ function integrationPage() {
         ["shop_name", "Shop Name · 店铺名称", state.storeName],
         ["client_id", "Client ID · Shopify App Client ID", ""],
         ["client_secret", "Client Secret · 仅服务端保存", ""],
+        ["admin_access_token", "Admin Access Token · 仅服务端保存（可选，推荐兜底）", ""],
         ["sync_interval", "同步频率", "每天一次"],
       ],
     },
@@ -2401,6 +2402,11 @@ function integrationPage() {
                       <strong>接通流程</strong>
                       <span>先填写 Customer ID、Developer Token，可选填 Login Customer ID（MCC）。保存后点击“连接 Google”，再做“测试连接”和“手动同步”。</span>
                     </div>`
+                  : source === "shopify"
+                    ? `<div class="integration-hint">
+                        <strong>接通流程</strong>
+                        <span>优先填写 Client ID / Client Secret；如果 Shopify 一直拒绝签发 token，可以直接补填当前店铺 Custom App 的 Admin Access Token 作为兜底，再保存并测试连接。</span>
+                      </div>`
                   : source === "ga4"
                     ? `<div class="integration-hint">
                         <strong>接通流程</strong>
