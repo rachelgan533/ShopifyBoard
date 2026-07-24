@@ -266,11 +266,23 @@ async function queryGoogleAdsCustomer({ accessToken, developerToken, customerId,
     }),
   });
 
-  const payload = await response.json().catch(() => ({}));
+  const requestId = response.headers.get("request-id") || response.headers.get("google-ads-request-id") || "";
+  const raw = await response.text();
+  let payload = {};
+  try {
+    payload = raw ? JSON.parse(raw) : {};
+  } catch {
+    payload = raw ? { raw } : {};
+  }
   if (!response.ok) {
     const error = new Error("Google Ads account validation failed");
     error.statusCode = response.status;
-    error.details = payload;
+    error.details = {
+      ...(payload && typeof payload === "object" && !Array.isArray(payload) ? payload : { payload }),
+      _request_id: requestId,
+      _raw: raw ? raw.slice(0, 500) : "",
+      _http_status: response.status,
+    };
     throw error;
   }
 
@@ -386,6 +398,13 @@ function describeGoogleOauthCallbackError(details) {
 
   if (combined.includes("google ads account validation failed")) {
     return nestedMessage || codeMessage || "Google Ads 账号校验失败，请检查 Customer ID、Developer Token、账号权限，以及是否需要填写 Login Customer ID（MCC）";
+  }
+
+  if (details?._raw) {
+    const compactRaw = String(details._raw).replace(/\s+/g, " ").trim();
+    if (compactRaw) {
+      return `Google Ads 账号校验失败：${compactRaw}${details._request_id ? `（request id: ${details._request_id}）` : ""}`;
+    }
   }
 
   return nestedMessage || codeMessage || topLevelMessage || "";
